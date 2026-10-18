@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Pre-commit: the gate, over the tree as it is, and nothing over 5 MiB.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+max=$((5 * 1024 * 1024))
+while IFS= read -r -d '' f; do
+  size="$(git cat-file -s ":$f")"
+  if [ "$size" -gt "$max" ]; then
+    echo "pre-commit: refusing $f ($size bytes): a build output or a binary does not belong in git" >&2
+    exit 1
+  fi
+done < <(git diff --cached --name-only -z --diff-filter=ACMR)
+
+make check
