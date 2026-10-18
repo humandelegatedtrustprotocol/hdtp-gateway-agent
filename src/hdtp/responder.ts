@@ -1,0 +1,248 @@
+// Answering the node's contacts: one reply per newest inbound message, one answer per request.
+//
+// A webhook names a thread or a request; reconciling walks list_pending and get_inbox. Threads end
+// in answerThread, which replies only when the thread's newest message is the contact's, under a
+// msg_id derived from that message. The node records one row per (account, contact, direction,
+// msg_id); a replay writes nothing and answers the original row's result
+// (messaging.Service.Record), so a webhook and a reconcile pass, or two processes, that both reach
+// one message record one reply.
+//
+// A thread whose contact's side is an agent too would otherwise be answered for as long as both
+// agents run. agentTurns counts the turns since the last message labelled as a person's, and at
+// the configured cap the thread is left alone until a person writes in it.
+//
+// Every contact is treated as messages_only, on purpose: the trust flag the node reports
+// (read_thread's `trust`, list_pending's TrustFlag) is neither read nor shown to the model. This
+// agent has no tools and can only write a message, which messages_only already allows, so a
+// higher flag would let it do nothing more.
+//
+// read_thread marks the thread read before the model has drafted anything. A thread whose draft
+// or send failed is therefore kept here and revisited by the next reconcile pass, up to
+// MAX_ATTEMPTS times; a process that stops in between loses it, because the node no longer
+// counts it unread. A request stays in list_pending until it is answered or expires, so each
+// reconcile pass reaches an unanswered one again.
+
+import { createHash } from 'node:crypto'
+import type { Log } from './log.ts'
+import { NodeRefusal, refusalCode, type InboxThread, type NodeClient, type PendingRequest, type ThreadMessage } from './node.ts'
+import { Bounded } from './bounded.ts'
+import { requestPrompt, threadPrompt } from './prompt.ts'
+import { DEFAULT_AGENT_TURN_CAP } from './config.ts'
+
+/** Writes the reply text for a prompt. The model behind it has no tools. */
+export type Draft = (prompt: string) => Promise<string>
+
+/**
+ * How many attempts one inbound message or one request gets: the first from the webhook or the
+ * pass that found it, then one more on each reconcile pass while the last one failed.
+ */
+export const MAX_ATTEMPTS = 3
+/** How many replied keys are remembered before the oldest is forgotten (the node still dedups). */
+export const REMEMBERED = 10_000
+
+/** The msg_id of the reply to a thread's newest message: the same from every path that reaches it. */
+export function replyKey(accountId: string, threadId: string, index: number, m: ThreadMessage): string {
+  const h = createHash('sha256')
+  for (const part of [accountId, threadId, String(index), String(m.created_at), m.sender, m.kind, m.body]) {
+    h.update(part).update('\0')
+  }
+  return `agent-reply-${h.digest('hex').slice(0, 32)}`
+}
+
+/**
+ * Agent-to-agent turns at the end of a thread: outbound messages labelled 'agent' that answer an
+ * inbound message labelled 'agent', counted back from the newest message to the newest message
+ * labelled 'human' in either direction (the contact's person, or the owner in the portal).
+ */
+export function agentTurns(messages: readonly ThreadMessage[]): number {
+  let turns = 0
+  for (let i = messages.length - 1; i > 0; i--) {
+    const m = messages[i]!
+    if (m.sender === 'human') break
+    const answered = messages[i - 1]!
+    if (m.direction === 'out' && answered.direction === 'in' && answered.sender === 'agent') turns++
+  }
+  return turns
+}
+
+export class Responder {
+  /** Keys of replies sent (msg_ids) and of requests answered. */
+  private readonly done = new Bounded<true>(REMEMBERED)
+  /** Attempts per key that has not succeeded. */
+  private readonly attempts = new Bounded<number>(REMEMBERED)
+  /** Threads (account \0 thread) to revisit on the next reconcile pass. */
+  private readonly revisit = new Bounded<true>(REMEMBERED)
+  /** Work in flight by key, and whether another call asked for it while it ran. */
+  private readonly running = new Map<string, { again: boolean }>()
+
+  private readonly node: NodeClient
+  private readonly draft: Draft
+  private readonly log: Log
+  private readonly turnCap: number
+
+  constructor(node: NodeClient, draft: Draft, log: Log, turnCap = DEFAULT_AGENT_TURN_CAP) {
+    this.node = node
+    this.draft = draft
+    this.log = log
+    this.turnCap = turnCap
+  }
+
+  /** A webhook's message.received: the thread it names, in whichever account holds it. */
+  async onMessage(threadId: string): Promise<void> {
+    for (const accountId of await this.node.listAccounts()) {
+      const row = (await this.node.getInbox(accountId)).find((t) => t.thread_id === threadId)
+      if (row) return this.answerThread(accountId, row)
+    }
+    this.log.info('thread_not_held', { thread_id: threadId })
+  }
+
+  /** A webhook's request.pending: the request it names, in whichever account holds it. */
+  async onRequest(requestId: string): Promise<void> {
+    for (const accountId of await this.node.listAccounts()) {
+      const row = (await this.node.listPending(accountId)).find((r) => r.ID === requestId)
+      if (row) return this.answerRequest(accountId, row)
+    }
+    this.log.info('request_not_open', { request_id: requestId })
+  }
+
+  /**
+   * One pass over every account: its open requests first, since a caller is waiting on each, then
+   * its unread threads and the threads a failure left to revisit. A section that fails is logged
+   * by code and the pass goes on, so a failing list_pending does not keep threads unanswered.
+   */
+  async reconcile(): Promise<void> {
+    for (const accountId of await this.node.listAccounts()) {
+      await this.section('list_pending', async () => {
+        for (const row of await this.node.listPending(accountId)) {
+          await this.answerRequest(accountId, row)
+        }
+      })
+      await this.section('get_inbox', async () => {
+        for (const row of await this.node.getInbox(accountId)) {
+          if (row.unread > 0 || this.revisit.has(`${accountId}\0${row.thread_id}`)) {
+            await this.answerThread(accountId, row)
+          }
+        }
+      })
+    }
+  }
+
+  private async section(name: string, work: () => Promise<void>): Promise<void> {
+    try {
+      await work()
+    } catch (e) {
+      this.log.warn('reconcile_failed', { section: name, reason: refusalCode(e) })
+    }
+  }
+
+  /** Runs `work` once per key at a time; a call that arrives meanwhile makes it run once more. */
+  private async single(key: string, work: () => Promise<void>): Promise<void> {
+    const held = this.running.get(key)
+    if (held) {
+      held.again = true
+      return
+    }
+    const state = { again: false }
+    this.running.set(key, state)
+    try {
+      do {
+        state.again = false
+        await work()
+      } while (state.again)
+    } finally {
+      this.running.delete(key)
+    }
+  }
+
+  async answerThread(accountId: string, row: InboxThread): Promise<void> {
+    const where = `${accountId}\0${row.thread_id}`
+    if (row.contact_status !== 'active') {
+      this.revisit.delete(where)
+      this.log.info('contact_not_active', { thread_id: row.thread_id, status: row.contact_status })
+      return
+    }
+    await this.single(where, async () => {
+      const messages = await this.node.readThread(accountId, row.thread_id)
+      const index = messages.length - 1
+      const newest = messages[index]
+      if (!newest || newest.direction !== 'in') {
+        this.revisit.delete(where)
+        return
+      }
+      const key = replyKey(accountId, row.thread_id, index, newest)
+      if (this.done.has(key)) {
+        this.revisit.delete(where)
+        return
+      }
+      const turns = agentTurns(messages)
+      if (turns >= this.turnCap) {
+        this.revisit.delete(where)
+        this.log.info('agent_turn_cap', { thread_id: row.thread_id, turns })
+        return
+      }
+      await this.attempt(key, where, { thread_id: row.thread_id }, async () => {
+        const text = await this.write(threadPrompt(messages))
+        await this.node.sendToContact({
+          account_id: accountId,
+          contact_fpr: row.contact_fpr,
+          thread_id: row.thread_id,
+          msg_id: key,
+          text,
+        })
+        this.log.info('replied', { thread_id: row.thread_id, msg_id: key })
+      })
+    })
+  }
+
+  async answerRequest(accountId: string, row: PendingRequest): Promise<void> {
+    const key = `request\0${accountId}\0${row.ID}`
+    await this.single(key, async () => {
+      if (this.done.has(key)) return
+      await this.attempt(key, null, { request_id: row.ID }, async () => {
+        const result = await this.write(requestPrompt(row))
+        await this.node.answerRequest({ account_id: accountId, request_id: row.ID, result })
+        this.log.info('answered', { request_id: row.ID })
+      })
+    })
+  }
+
+  /** The model's text for a prompt; a failure or an empty text is a refusal named draft. */
+  private async write(prompt: string): Promise<string> {
+    let text: string
+    try {
+      text = (await this.draft(prompt)).trim()
+    } catch {
+      throw new NodeRefusal('draft', 'model_failed')
+    }
+    if (!text) throw new NodeRefusal('draft', 'empty')
+    return text
+  }
+
+  /** Runs one attempt for a key, counting it, and keeps the thread to revisit while attempts remain. */
+  private async attempt(
+    key: string,
+    where: string | null,
+    ids: Record<string, string>,
+    work: () => Promise<void>,
+  ): Promise<void> {
+    const n = (this.attempts.get(key) ?? 0) + 1
+    if (n > MAX_ATTEMPTS) {
+      if (where) this.revisit.delete(where)
+      return
+    }
+    this.attempts.set(key, n)
+    try {
+      await work()
+      this.done.set(key, true)
+      this.attempts.delete(key)
+      if (where) this.revisit.delete(where)
+    } catch (e) {
+      const last = n >= MAX_ATTEMPTS
+      this.log.warn(last ? 'gave_up' : 'attempt_failed', { ...ids, reason: refusalCode(e), attempt: n })
+      if (where) {
+        if (last) this.revisit.delete(where)
+        else this.revisit.set(where, true)
+      }
+    }
+  }
+}
