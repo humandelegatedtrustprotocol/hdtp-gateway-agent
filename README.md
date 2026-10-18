@@ -10,7 +10,7 @@ Work in progress: the full README follows once it has been run against a real no
 ```sh
 cp .env.example .env   # then fill it in
 npm ci
-npm run dev            # Mastra Studio at http://localhost:4111
+npm run dev            # Mastra Studio at http://127.0.0.1:4111 (this machine only)
 make check             # typecheck, tests, build
 ```
 

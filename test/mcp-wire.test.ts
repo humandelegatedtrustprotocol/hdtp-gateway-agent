@@ -22,7 +22,7 @@ async function bodyOf(req: IncomingMessage): Promise<string> {
   return Buffer.concat(chunks).toString('utf8')
 }
 
-function serve(node: FakeNode): Promise<{ server: Server; url: string; unauthorized: () => number }> {
+function serve(node: FakeNode, port = 0): Promise<{ server: Server; url: string; unauthorized: () => number }> {
   let unauthorized = 0
   const server = createServer(async (req, res) => {
     if (req.headers.authorization !== `Bearer ${TOKEN}`) {
@@ -61,11 +61,22 @@ function serve(node: FakeNode): Promise<{ server: Server; url: string; unauthori
     }
   })
   return new Promise((resolve) =>
-    server.listen(0, '127.0.0.1', () => {
+    server.listen(port, '127.0.0.1', () => {
       const { port } = server.address() as AddressInfo
       resolve({ server, url: `http://127.0.0.1:${port}/owner/mcp`, unauthorized: () => unauthorized })
     }),
   )
+}
+
+/** A port nothing listens on: bound, then closed. */
+function closedPort(): Promise<number> {
+  return new Promise((resolve) => {
+    const s = createServer()
+    s.listen(0, '127.0.0.1', () => {
+      const { port } = s.address() as AddressInfo
+      s.close(() => resolve(port))
+    })
+  })
 }
 
 describe('the owner MCP over the wire', () => {
@@ -141,20 +152,31 @@ describe('the owner MCP over the wire', () => {
     }
     expect(unauthorized()).toBeGreaterThan(before)
 
-    const closed = await new Promise<string>((resolve) => {
-      const s = createServer()
-      s.listen(0, '127.0.0.1', () => {
-        const { port } = s.address() as AddressInfo
-        s.close(() => resolve(`http://127.0.0.1:${port}/owner/mcp`))
-      })
-    })
-    const down = connectNode(closed, TOKEN)
+    const port = await closedPort()
+    const down = connectNode(`http://127.0.0.1:${port}/owner/mcp`, TOKEN)
     try {
       const e = await down.node.listAccounts().catch((x: unknown) => x)
       expect(e).toBeInstanceOf(NodeRefusal)
       expect((e as NodeRefusal).code).toBe('node_unreachable')
     } finally {
       await down.disconnect()
+    }
+  })
+
+  it('reaches a node that comes up after the agent did, with the same client', async () => {
+    const port = await closedPort()
+    const { node: client, disconnect } = connectNode(`http://127.0.0.1:${port}/owner/mcp`, TOKEN)
+    try {
+      const first = await client.listAccounts().catch((x: unknown) => x)
+      expect((first as NodeRefusal).code).toBe('node_unreachable')
+      const up = await serve(new FakeNode(), port)
+      try {
+        expect(await client.listAccounts()).toEqual(['acct-1'])
+      } finally {
+        await new Promise<void>((r) => up.server.close(() => r()))
+      }
+    } finally {
+      await disconnect()
     }
   })
 })
