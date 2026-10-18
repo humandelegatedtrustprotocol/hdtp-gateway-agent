@@ -1,83 +1,14 @@
 // The real client path: @mastra/mcp's MCPClient against an owner MCP served over HTTP as the node
-// serves it. owner-mcp-tools.json is the node's tools/list for the six tools this agent calls,
-// captured from hdtp-gateway 4906e99 on 2026-10-18. Like the node, the server answers
-// server/discover with "method not found" and keeps no session.
+// serves it (test/wire.ts).
 
-import { createServer, type IncomingMessage, type Server } from 'node:http'
-import type { AddressInfo } from 'node:net'
-import { readFileSync } from 'node:fs'
+import type { Server } from 'node:http'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { NodeRefusal, connectNode } from '../src/hdtp/node.ts'
 import { Responder } from '../src/hdtp/responder.ts'
 import { SIGNATURE_HEADER } from '../src/hdtp/signature.ts'
 import { createReceiver } from '../src/hdtp/webhook.ts'
 import { FakeNode, envelope, memoryLog, sign } from './fakes.ts'
-
-const TOKEN = 'hdtp_test-token'
-const tools = JSON.parse(readFileSync(new URL('./owner-mcp-tools.json', import.meta.url), 'utf8')) as Array<{ name: string }>
-
-async function bodyOf(req: IncomingMessage): Promise<string> {
-  const chunks: Buffer[] = []
-  for await (const c of req) chunks.push(c as Buffer)
-  return Buffer.concat(chunks).toString('utf8')
-}
-
-function serve(node: FakeNode, port = 0): Promise<{ server: Server; url: string; unauthorized: () => number }> {
-  let unauthorized = 0
-  const server = createServer(async (req, res) => {
-    if (req.headers.authorization !== `Bearer ${TOKEN}`) {
-      unauthorized++
-      res.writeHead(401).end('a bearer token is required')
-      return
-    }
-    if (req.method !== 'POST') {
-      res.writeHead(405).end()
-      return
-    }
-    const msg = JSON.parse(await bodyOf(req)) as { id?: number; method: string; params?: Record<string, unknown> }
-    if (msg.id === undefined) {
-      res.writeHead(202).end()
-      return
-    }
-    const reply = (body: Record<string, unknown>) =>
-      res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ jsonrpc: '2.0', id: msg.id, ...body }))
-    switch (msg.method) {
-      case 'initialize':
-        return reply({
-          result: {
-            protocolVersion: '2025-06-18',
-            capabilities: { resources: {}, tools: {} },
-            serverInfo: { name: 'hdtp-gateway-owner', version: '1' },
-          },
-        })
-      case 'tools/list':
-        return reply({ result: { tools } })
-      case 'tools/call': {
-        const p = msg.params as { name: string; arguments: Record<string, unknown> }
-        return reply({ result: await node.call(p.name, p.arguments ?? {}) })
-      }
-      default:
-        return reply({ error: { code: -32601, message: `method not found: "${msg.method}"` } })
-    }
-  })
-  return new Promise((resolve) =>
-    server.listen(port, '127.0.0.1', () => {
-      const { port } = server.address() as AddressInfo
-      resolve({ server, url: `http://127.0.0.1:${port}/owner/mcp`, unauthorized: () => unauthorized })
-    }),
-  )
-}
-
-/** A port nothing listens on: bound, then closed. */
-function closedPort(): Promise<number> {
-  return new Promise((resolve) => {
-    const s = createServer()
-    s.listen(0, '127.0.0.1', () => {
-      const { port } = s.address() as AddressInfo
-      s.close(() => resolve(port))
-    })
-  })
-}
+import { TOKEN, closedPort, serve } from './wire.ts'
 
 describe('the owner MCP over the wire', () => {
   const node = new FakeNode()

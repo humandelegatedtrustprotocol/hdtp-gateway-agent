@@ -5,8 +5,8 @@ export const DEFAULT_MODEL = 'openai/gpt-6-luna'
 export const DEFAULT_OWNER_MCP_URL = 'http://127.0.0.1:8080/owner/mcp'
 export const DEFAULT_RECONCILE_SECONDS = 60
 export const DEFAULT_PERSONA_FILE = 'persona.md'
-/** Loopback only: Studio and Mastra's /api routes take no credential. */
-export const DEFAULT_HOST = '127.0.0.1'
+/** How many agent-to-agent turns in a row a thread may have before the agent stops answering it. */
+export const DEFAULT_AGENT_TURN_CAP = 3
 
 export interface Config {
   model: string
@@ -15,21 +15,25 @@ export interface Config {
   webhookSecret: string | undefined
   reconcileSeconds: number
   personaFile: string
-  host: string
+  agentTurnCap: number
 }
 
 const set = (v: string | undefined) => (v === undefined || v.trim() === '' ? undefined : v.trim())
 
+/** A whole number above 0, or the default when the value is anything else. */
+function count(v: string | undefined, fallback: number): number {
+  const n = Number(set(v) ?? fallback)
+  return Number.isInteger(n) && n > 0 ? n : fallback
+}
+
 export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const seconds = Number(set(env.HDTP_RECONCILE_SECONDS) ?? DEFAULT_RECONCILE_SECONDS)
   return {
     model: set(env.HDTP_AGENT_MODEL) ?? DEFAULT_MODEL,
     ownerMcpUrl: set(env.HDTP_OWNER_MCP_URL) ?? DEFAULT_OWNER_MCP_URL,
     ownerToken: set(env.HDTP_OWNER_TOKEN),
     webhookSecret: set(env.HDTP_WEBHOOK_SECRET),
-    reconcileSeconds: Number.isInteger(seconds) && seconds > 0 ? seconds : DEFAULT_RECONCILE_SECONDS,
+    reconcileSeconds: count(env.HDTP_RECONCILE_SECONDS, DEFAULT_RECONCILE_SECONDS),
     personaFile: set(env.HDTP_PERSONA_FILE) ?? DEFAULT_PERSONA_FILE,
-    // Mastra's own variable, read here because a host in the server option outranks it.
-    host: set(env.MASTRA_HOST) ?? DEFAULT_HOST,
+    agentTurnCap: count(env.HDTP_AGENT_TURN_CAP, DEFAULT_AGENT_TURN_CAP),
   }
 }

@@ -39,10 +39,11 @@ describe('the configuration', () => {
     expect(readConfig({ HDTP_RECONCILE_SECONDS: '1.5' }).reconcileSeconds).toBe(60)
   })
 
-  it('listens on 127.0.0.1 unless MASTRA_HOST opts in to another address', () => {
-    expect(readConfig({}).host).toBe('127.0.0.1')
-    expect(readConfig({ MASTRA_HOST: '' }).host).toBe('127.0.0.1')
-    expect(readConfig({ MASTRA_HOST: '0.0.0.0' }).host).toBe('0.0.0.0')
+  it('caps agent-to-agent turns at 3 by default, and at a whole number above 0 when set', () => {
+    expect(readConfig({}).agentTurnCap).toBe(3)
+    expect(readConfig({ HDTP_AGENT_TURN_CAP: '5' }).agentTurnCap).toBe(5)
+    expect(readConfig({ HDTP_AGENT_TURN_CAP: '0' }).agentTurnCap).toBe(3)
+    expect(readConfig({ HDTP_AGENT_TURN_CAP: '2.5' }).agentTurnCap).toBe(3)
   })
 
   it('lists every variable it reads in .env.example', () => {

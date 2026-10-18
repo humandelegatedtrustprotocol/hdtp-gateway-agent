@@ -1,6 +1,8 @@
 # The gate: `make check` runs from githooks/ before every commit and every push. There is no CI.
 
 export MASTRA_TELEMETRY_DISABLED := 1
+# Studio calls its API at the address it was opened at: localhost and 127.0.0.1 both work.
+export MASTRA_AUTO_DETECT_URL := true
 
 .PHONY: check typecheck test build dev
 

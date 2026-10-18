@@ -1,26 +1,40 @@
-// Answering the node's contacts: one reply per inbound message, one answer per request.
+// Answering the node's contacts: one reply per newest inbound message, one answer per request.
 //
-// A webhook names a thread or a request; reconciling walks get_inbox. Both end in answerThread,
-// which replies only when the thread's newest message is the contact's, under a msg_id derived
-// from that message. The node records a msg_id once per account, contact and direction and
-// acknowledges a repeat without sending it again (messaging.Service.Record), so a webhook and a
-// reconcile pass, or two processes, that both reach one message send one reply.
+// A webhook names a thread or a request; reconciling walks list_pending and get_inbox. Threads end
+// in answerThread, which replies only when the thread's newest message is the contact's, under a
+// msg_id derived from that message. The node records one row per (account, contact, msg_id); a
+// replay writes nothing and answers the original row's result (messaging.Service.Record), so a
+// webhook and a reconcile pass, or two processes, that both reach one message record one reply.
+//
+// A thread whose contact's side is an agent too would otherwise be answered for as long as both
+// agents run. agentTurns counts the turns since the last message labelled as a person's, and at
+// the configured cap the thread is left alone until a person writes in it.
+//
+// Every contact is treated as messages_only, on purpose: the trust flag the node reports
+// (read_thread's `trust`, list_pending's TrustFlag) is neither read nor shown to the model. This
+// agent has no tools and can only write a message, which messages_only already allows, so a
+// higher flag would let it do nothing more.
 //
 // read_thread marks the thread read before the model has drafted anything. A thread whose draft
 // or send failed is therefore kept here and revisited by the next reconcile pass, up to
 // MAX_ATTEMPTS times; a process that stops in between loses it, because the node no longer
-// counts it unread.
+// counts it unread. A request stays in list_pending until it is answered or expires, so each
+// reconcile pass reaches an unanswered one again.
 
 import { createHash } from 'node:crypto'
 import type { Log } from './log.ts'
 import { NodeRefusal, refusalCode, type InboxThread, type NodeClient, type PendingRequest, type ThreadMessage } from './node.ts'
 import { Bounded } from './bounded.ts'
 import { requestPrompt, threadPrompt } from './prompt.ts'
+import { DEFAULT_AGENT_TURN_CAP } from './config.ts'
 
 /** Writes the reply text for a prompt. The model behind it has no tools. */
 export type Draft = (prompt: string) => Promise<string>
 
-/** How many times one inbound message or one request is attempted, across reconcile passes. */
+/**
+ * How many attempts one inbound message or one request gets: the first from the webhook or the
+ * pass that found it, then one more on each reconcile pass while the last one failed.
+ */
 export const MAX_ATTEMPTS = 3
 /** How many replied keys are remembered before the oldest is forgotten (the node still dedups). */
 export const REMEMBERED = 10_000
@@ -32,6 +46,22 @@ export function replyKey(accountId: string, threadId: string, index: number, m: 
     h.update(part).update('\0')
   }
   return `agent-reply-${h.digest('hex').slice(0, 32)}`
+}
+
+/**
+ * Agent-to-agent turns at the end of a thread: outbound messages labelled 'agent' that answer an
+ * inbound message labelled 'agent', counted back from the newest message to the newest message
+ * labelled 'human' in either direction (the contact's person, or the owner in the portal).
+ */
+export function agentTurns(messages: readonly ThreadMessage[]): number {
+  let turns = 0
+  for (let i = messages.length - 1; i > 0; i--) {
+    const m = messages[i]!
+    if (m.sender === 'human') break
+    const answered = messages[i - 1]!
+    if (m.direction === 'out' && answered.direction === 'in' && answered.sender === 'agent') turns++
+  }
+  return turns
 }
 
 export class Responder {
@@ -47,11 +77,13 @@ export class Responder {
   private readonly node: NodeClient
   private readonly draft: Draft
   private readonly log: Log
+  private readonly turnCap: number
 
-  constructor(node: NodeClient, draft: Draft, log: Log) {
+  constructor(node: NodeClient, draft: Draft, log: Log, turnCap = DEFAULT_AGENT_TURN_CAP) {
     this.node = node
     this.draft = draft
     this.log = log
+    this.turnCap = turnCap
   }
 
   /** A webhook's message.received: the thread it names, in whichever account holds it. */
@@ -72,9 +104,15 @@ export class Responder {
     this.log.info('request_not_open', { request_id: requestId })
   }
 
-  /** One pass over every account's inbox: unread threads, and threads a failure left to revisit. */
+  /**
+   * One pass over every account: its open requests first, since a caller is waiting on each, then
+   * its unread threads and the threads a failure left to revisit.
+   */
   async reconcile(): Promise<void> {
     for (const accountId of await this.node.listAccounts()) {
+      for (const row of await this.node.listPending(accountId)) {
+        await this.answerRequest(accountId, row)
+      }
       for (const row of await this.node.getInbox(accountId)) {
         if (row.unread > 0 || this.revisit.has(`${accountId}\0${row.thread_id}`)) {
           await this.answerThread(accountId, row)
@@ -120,6 +158,12 @@ export class Responder {
       const key = replyKey(accountId, row.thread_id, index, newest)
       if (this.done.has(key)) {
         this.revisit.delete(where)
+        return
+      }
+      const turns = agentTurns(messages)
+      if (turns >= this.turnCap) {
+        this.revisit.delete(where)
+        this.log.info('agent_turn_cap', { thread_id: row.thread_id, turns })
         return
       }
       await this.attempt(key, where, { thread_id: row.thread_id }, async () => {

@@ -9,9 +9,9 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "MASTRA_TELEMETRY_DISABLED=1 mastra dev",
+    "dev": "MASTRA_TELEMETRY_DISABLED=1 MASTRA_AUTO_DETECT_URL=true mastra dev",
     "build": "MASTRA_TELEMETRY_DISABLED=1 mastra build",
-    "start": "MASTRA_TELEMETRY_DISABLED=1 mastra start",
+    "start": "MASTRA_TELEMETRY_DISABLED=1 MASTRA_AUTO_DETECT_URL=true mastra start",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

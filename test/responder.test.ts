@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { nodeClientOver } from '../src/hdtp/node.ts'
 import { FRAME, THREAD_WINDOW, threadPrompt } from '../src/hdtp/prompt.ts'
-import { MAX_ATTEMPTS, Responder } from '../src/hdtp/responder.ts'
+import { MAX_ATTEMPTS, Responder, agentTurns } from '../src/hdtp/responder.ts'
 import { FakeNode, memoryLog } from './fakes.ts'
 
 function setup(draft?: (prompt: string) => Promise<string>) {
@@ -20,7 +20,7 @@ function setup(draft?: (prompt: string) => Promise<string>) {
   return { node, prompts, responder, log }
 }
 
-describe('one reply per inbound message', () => {
+describe('one reply per newest inbound message', () => {
   it('replies once when a webhook and a reconcile pass both reach a message', async () => {
     const { node, prompts, responder } = setup()
     node.thread('th1')
@@ -33,7 +33,7 @@ describe('one reply per inbound message', () => {
     expect(node.sent[0]).toMatchObject({ account_id: 'acct-1', contact_fpr: 'fpr-contact', thread_id: 'th1', text: 'reply 1' })
   })
 
-  it('drafts once when both arrive at the same time', async () => {
+  it('drafts once when two deliveries for one thread arrive at the same time', async () => {
     let release!: () => void
     const gate = new Promise<void>((r) => (release = r))
     let drafts = 0
@@ -44,8 +44,9 @@ describe('one reply per inbound message', () => {
     })
     node.thread('th1')
     node.inbound('th1', 'hello')
+    // Both find the thread: a delivery looks it up whether or not the node still counts it unread.
     const a = responder.onMessage('th1')
-    const b = responder.reconcile()
+    const b = responder.onMessage('th1')
     await new Promise((r) => setTimeout(r, 10))
     release()
     await Promise.all([a, b])
@@ -162,6 +163,79 @@ describe('a failure after the thread was read', () => {
   })
 })
 
+describe('a thread between two agents', () => {
+  /** n agent-to-agent turns: the contact's agent writes, this agent answers, n times. */
+  function turns(node: FakeNode, threadId: string, n: number): void {
+    for (let i = 0; i < n; i++) {
+      node.inbound(threadId, `their agent ${i}`, 'agent')
+      node.outbound(threadId, `our agent ${i}`, 'agent')
+    }
+  }
+
+  it('is answered below the cap, though the contact is labelled agent', async () => {
+    const { node, prompts, responder } = setup()
+    node.thread('th1')
+    turns(node, 'th1', 2)
+    node.inbound('th1', 'still there?', 'agent')
+    await responder.onMessage('th1')
+    expect(prompts).toHaveLength(1)
+    expect(node.sent).toHaveLength(1)
+  })
+
+  it('is not drafted for at the cap', async () => {
+    const { node, prompts, responder, log } = setup()
+    node.thread('th1')
+    turns(node, 'th1', 3)
+    node.inbound('th1', 'and again', 'agent')
+    await responder.onMessage('th1')
+    await responder.reconcile()
+    expect(prompts).toEqual([])
+    expect(node.sent).toEqual([])
+    expect(log.lines.find((l) => l.code === 'agent_turn_cap')?.fields).toEqual({ thread_id: 'th1', turns: 3 })
+  })
+
+  it('counts again from a message labelled human, on either side', async () => {
+    for (const human of ['contact', 'owner'] as const) {
+      const { node, prompts, responder } = setup()
+      node.thread('th1')
+      turns(node, 'th1', 3)
+      if (human === 'contact') node.inbound('th1', 'a person writes', 'human')
+      else node.outbound('th1', 'the owner writes from the portal', 'human')
+      // This agent's answer to a person is not an agent-to-agent turn; two that follow are.
+      node.outbound('th1', 'our answer to the person', 'agent')
+      turns(node, 'th1', 2)
+      node.inbound('th1', 'their agent again', 'agent')
+      expect(agentTurns(node.threads.get('th1')!.messages), human).toBe(2)
+      await responder.onMessage('th1')
+      expect(prompts, human).toHaveLength(1)
+    }
+  })
+
+  it('stops when two agents relay each other’s replies, after the cap on each side', async () => {
+    const a = setup()
+    const b = setup()
+    a.node.thread('th-a', 'fpr-b')
+    b.node.thread('th-b', 'fpr-a')
+    // B's agent opens: an outbound message on B's node, the same message inbound on A's.
+    b.node.outbound('th-b', 'hello from B', 'agent')
+    a.node.inbound('th-a', 'hello from B', 'agent')
+    let relayedA = 0
+    let relayedB = 0
+    for (let round = 0; round < 20; round++) {
+      await a.responder.reconcile()
+      for (const s of a.node.sent.slice(relayedA)) b.node.inbound('th-b', s.text, 'agent')
+      await b.responder.reconcile()
+      for (const s of b.node.sent.slice(relayedB)) a.node.inbound('th-a', s.text, 'agent')
+      if (a.node.sent.length === relayedA && b.node.sent.length === relayedB) break
+      relayedA = a.node.sent.length
+      relayedB = b.node.sent.length
+    }
+    expect(a.node.sent).toHaveLength(3)
+    expect(b.node.sent).toHaveLength(3)
+    expect(a.log.lines.map((l) => l.code)).toContain('agent_turn_cap')
+  })
+})
+
 describe('agent-answered requests', () => {
   it('answers a request.pending once, with the drafted result', async () => {
     const { node, prompts, responder } = setup()
@@ -171,6 +245,28 @@ describe('agent-answered requests', () => {
     expect(node.answered).toEqual([{ request_id: 'req1', result: 'reply 1' }])
     expect(prompts).toHaveLength(1)
     expect(prompts[0]).toContain('ask_alex')
+  })
+
+  it('answers through the reconcile pass a request no webhook announced', async () => {
+    const { node, responder } = setup()
+    node.pending.push({ ID: 'req1', ContactFpr: 'fpr-contact', Capability: 'ask_alex', Args: '{}', Status: 'open', ExpiresAt: 0 })
+    await responder.reconcile()
+    await responder.reconcile()
+    expect(node.answered).toEqual([{ request_id: 'req1', result: 'reply 1' }])
+  })
+
+  it('tries a request whose answer failed again on the next pass', async () => {
+    let fail = true
+    const { node, responder } = setup(async () => {
+      if (fail) throw new Error('model down')
+      return 'the answer'
+    })
+    node.pending.push({ ID: 'req1', ContactFpr: 'fpr-contact', Capability: 'ask_alex', Args: '{}', Status: 'open', ExpiresAt: 0 })
+    await responder.onRequest('req1')
+    expect(node.answered).toEqual([])
+    fail = false
+    await responder.reconcile()
+    expect(node.answered).toEqual([{ request_id: 'req1', result: 'the answer' }])
   })
 
   it('does nothing for a request that is not open', async () => {

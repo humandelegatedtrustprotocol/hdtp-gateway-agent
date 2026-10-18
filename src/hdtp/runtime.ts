@@ -29,7 +29,7 @@ export function startRuntime(config: Config, agent: Agent, log: Log = consoleLog
   } else {
     const { node } = connectNode(config.ownerMcpUrl, config.ownerToken)
     const draft = async (prompt: string) => (await agent.generate(prompt)).text
-    const r = new Responder(node, draft, log)
+    const r = new Responder(node, draft, log, config.agentTurnCap)
     responder = r
     let sweeping = false
     const sweep = async () => {

@@ -133,6 +133,16 @@ describe('POST /hdtp/webhook', () => {
     expect(seen).toEqual(['message:th1', 'request:req1', 'reconcile'])
   })
 
+  it('does not count an unsigned delivery as seen: the signed one with its id is still handled', async () => {
+    const { receive, seen, settle } = setup()
+    const body = envelope('evt_1', 'message.received', { thread_id: 'th1' })
+    const unsigned = await receive(post(body))
+    const good = await receive(signed(body))
+    await settle()
+    expect([unsigned.status, good.status]).toEqual([401, 202])
+    expect(seen).toEqual(['message:th1'])
+  })
+
   it('handles a delivery posted twice once', async () => {
     const { receive, seen, settle } = setup()
     const body = envelope('evt_1', 'message.received', { thread_id: 'th1' })

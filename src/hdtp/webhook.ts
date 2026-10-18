@@ -3,8 +3,8 @@
 // The order is fixed. The body is read up to MAX_BODY_BYTES, counting the bytes read; the
 // signature is checked over those raw bytes before anything parses them; the envelope's own
 // `type` (signed) decides what happens, never the unsigned X-HDTP-Event-Type header. The answer
-// is sent before the work starts: the node makes one attempt with a 10 s timeout, and a model
-// call can take longer than that.
+// is sent before the work starts: the node's sender, as planned (not built yet), makes one attempt
+// with a 10 s timeout, and a model call can take longer than that.
 
 import { Bounded } from './bounded.ts'
 import type { Log } from './log.ts'

@@ -61,16 +61,18 @@ export class FakeNode {
     this.threads.set(id, { account, contact_fpr: contact, contact_status: status, messages: [], readThrough: 0 })
   }
 
-  inbound(threadId: string, body: string): void {
+  /** A message from the contact, labelled as their side labelled it ('human' or 'agent'). */
+  inbound(threadId: string, body: string, sender = 'human'): void {
     const th = this.threads.get(threadId)
     if (!th) throw new Error('no thread')
-    th.messages.push({ direction: 'in', sender: 'human', kind: 'text', body, trust: 'messages_only', created_at: ++this.clock })
+    th.messages.push({ direction: 'in', sender, kind: 'text', body, trust: 'messages_only', created_at: ++this.clock })
   }
 
-  outbound(threadId: string, body: string): void {
+  /** A message from this side: the owner in the portal ('human') or an agent ('agent'). */
+  outbound(threadId: string, body: string, sender = 'human'): void {
     const th = this.threads.get(threadId)
     if (!th) throw new Error('no thread')
-    th.messages.push({ direction: 'out', sender: 'human', kind: 'text', body, trust: 'messages_only', created_at: ++this.clock })
+    th.messages.push({ direction: 'out', sender, kind: 'text', body, trust: 'messages_only', created_at: ++this.clock })
     th.readThrough = th.messages.length
   }
 
