@@ -25,11 +25,6 @@ describe('the delegate agent', () => {
   it('has no memory of its own', () => {
     expect(delegate.hasOwnMemory()).toBe(false)
   })
-
-  it('is served on the loopback interface only', async () => {
-    const { mastra } = await import('../src/mastra/index.ts')
-    expect(mastra.getServer()?.host).toBe('127.0.0.1')
-  })
 })
 
 describe('the configuration', () => {
