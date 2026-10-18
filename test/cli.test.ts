@@ -11,7 +11,7 @@ import { getServerOptions } from '@mastra/deployer/build'
 import { describe, expect, it } from 'vitest'
 
 describe("the CLI's reading of the entry file", () => {
-  it('binds the loopback interface and starts no second runtime', async () => {
+  it('binds the loopback interface by default and starts no second runtime', async () => {
     let calls = 0
     const node = createServer((_req, res) => {
       calls++
@@ -19,7 +19,8 @@ describe("the CLI's reading of the entry file", () => {
     })
     await new Promise<void>((r) => node.listen(0, '127.0.0.1', () => r()))
     const { port } = node.address() as AddressInfo
-    const saved = { url: process.env.HDTP_OWNER_MCP_URL, token: process.env.HDTP_OWNER_TOKEN }
+    const saved = { url: process.env.HDTP_OWNER_MCP_URL, token: process.env.HDTP_OWNER_TOKEN, host: process.env.MASTRA_HOST }
+    delete process.env.MASTRA_HOST
     process.env.HDTP_OWNER_MCP_URL = `http://127.0.0.1:${port}/owner/mcp`
     process.env.HDTP_OWNER_TOKEN = 'hdtp_cli-test'
     // Inside the project, as the CLI's own .mastra/output is, so the bundle resolves its imports.
@@ -36,8 +37,24 @@ describe("the CLI's reading of the entry file", () => {
       process.env.HDTP_OWNER_TOKEN = saved.token
       if (saved.url === undefined) delete process.env.HDTP_OWNER_MCP_URL
       if (saved.token === undefined) delete process.env.HDTP_OWNER_TOKEN
+      if (saved.host !== undefined) process.env.MASTRA_HOST = saved.host
       rmSync(out, { recursive: true, force: true })
       await new Promise<void>((r) => node.close(() => r()))
+    }
+  }, 30_000)
+
+  it('binds the address MASTRA_HOST names, when it names one', async () => {
+    const saved = process.env.MASTRA_HOST
+    process.env.MASTRA_HOST = '0.0.0.0'
+    mkdirSync('.mastra', { recursive: true })
+    const out = mkdtempSync(join('.mastra', 'cli-test-'))
+    try {
+      const server = await getServerOptions(resolve('src/mastra/index.ts'), resolve(out))
+      expect(server?.host).toBe('0.0.0.0')
+    } finally {
+      if (saved === undefined) delete process.env.MASTRA_HOST
+      else process.env.MASTRA_HOST = saved
+      rmSync(out, { recursive: true, force: true })
     }
   }, 30_000)
 })

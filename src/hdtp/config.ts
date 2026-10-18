@@ -5,6 +5,8 @@ export const DEFAULT_MODEL = 'openai/gpt-6-luna'
 export const DEFAULT_OWNER_MCP_URL = 'http://127.0.0.1:8080/owner/mcp'
 export const DEFAULT_RECONCILE_SECONDS = 60
 export const DEFAULT_PERSONA_FILE = 'persona.md'
+/** Loopback only: Studio and Mastra's /api routes take no credential. */
+export const DEFAULT_HOST = '127.0.0.1'
 
 export interface Config {
   model: string
@@ -13,6 +15,7 @@ export interface Config {
   webhookSecret: string | undefined
   reconcileSeconds: number
   personaFile: string
+  host: string
 }
 
 const set = (v: string | undefined) => (v === undefined || v.trim() === '' ? undefined : v.trim())
@@ -26,5 +29,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
     webhookSecret: set(env.HDTP_WEBHOOK_SECRET),
     reconcileSeconds: Number.isInteger(seconds) && seconds > 0 ? seconds : DEFAULT_RECONCILE_SECONDS,
     personaFile: set(env.HDTP_PERSONA_FILE) ?? DEFAULT_PERSONA_FILE,
+    // Mastra's own variable, read here because a host in the server option outranks it.
+    host: set(env.MASTRA_HOST) ?? DEFAULT_HOST,
   }
 }

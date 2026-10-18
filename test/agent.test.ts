@@ -39,6 +39,12 @@ describe('the configuration', () => {
     expect(readConfig({ HDTP_RECONCILE_SECONDS: '1.5' }).reconcileSeconds).toBe(60)
   })
 
+  it('listens on 127.0.0.1 unless MASTRA_HOST opts in to another address', () => {
+    expect(readConfig({}).host).toBe('127.0.0.1')
+    expect(readConfig({ MASTRA_HOST: '' }).host).toBe('127.0.0.1')
+    expect(readConfig({ MASTRA_HOST: '0.0.0.0' }).host).toBe('0.0.0.0')
+  })
+
   it('lists every variable it reads in .env.example', () => {
     const example = readFileSync('.env.example', 'utf8')
     const source = readFileSync('src/hdtp/config.ts', 'utf8')
