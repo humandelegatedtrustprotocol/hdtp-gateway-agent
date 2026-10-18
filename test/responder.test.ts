@@ -269,6 +269,16 @@ describe('agent-answered requests', () => {
     expect(node.answered).toEqual([{ request_id: 'req1', result: 'the answer' }])
   })
 
+  it('answers threads in a pass whose list_pending fails, and names the failure', async () => {
+    const { node, responder, log } = setup()
+    node.failing.add('list_pending')
+    node.thread('th1')
+    node.inbound('th1', 'are you there?')
+    await responder.reconcile()
+    expect(node.sent).toHaveLength(1)
+    expect(log.lines).toContainEqual({ code: 'reconcile_failed', fields: { section: 'list_pending', reason: 'list_pending:internal' } })
+  })
+
   it('does nothing for a request that is not open', async () => {
     const { node, prompts, responder, log } = setup()
     await responder.onRequest('nope')

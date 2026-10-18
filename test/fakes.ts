@@ -55,6 +55,8 @@ export class FakeNode {
   answered: Array<{ request_id: string; result: string }> = []
   /** Set to make send_to_contact record the message and answer it undelivered. */
   undelivered = false
+  /** Tools that answer the refusal `internal`. */
+  failing = new Set<string>()
   private clock = 1_760_000_000
 
   thread(id: string, contact = 'fpr-contact', status = 'active', account = 'acct-1'): void {
@@ -79,6 +81,7 @@ export class FakeNode {
   /** One tool call, answered as the node answers it. */
   call = async (name: string, args: Record<string, unknown>): Promise<ToolAnswer> => {
     this.calls.push(name)
+    if (this.failing.has(name)) return refusal('internal')
     const acct = args.account_id as string
     if (name !== 'list_accounts' && !this.accounts.includes(acct)) return { isError: true, content: [{ type: 'text', text: '{"code":"permission_denied"}' }] }
     switch (name) {
