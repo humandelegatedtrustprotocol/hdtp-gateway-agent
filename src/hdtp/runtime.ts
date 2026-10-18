@@ -17,7 +17,7 @@ let receiver: ((req: Request) => Promise<Response>) | null = null
 
 /** POST /hdtp/webhook: the started runtime's receiver, or 503 in a process that has not started one. */
 export function receive(req: Request): Promise<Response> {
-  return receiver ? receiver(req) : Promise.resolve(Response.json({ error: 'not_started' }, { status: 503 }))
+  return receiver ? receiver(req) : Promise.resolve(Response.json({ code: 'not_started' }, { status: 503 }))
 }
 
 export function startRuntime(config: Config, agent: Agent, log: Log = consoleLog): void {
