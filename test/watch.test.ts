@@ -114,6 +114,11 @@ describe('the wait_for_updates loop', () => {
     ['no content', { content: [] }],
     ['JSON that is not an object', ok(42)],
     ['an answer with no cursor', ok({ threads: null, pending_requests: 0, timed_out: false })],
+    ['a cursor that is a string', ok({ cursor: '3', threads: null, pending_requests: 0, timed_out: false })],
+    ['a negative cursor', ok({ cursor: -1, threads: null, pending_requests: 0, timed_out: false })],
+    ['a fractional cursor', ok({ cursor: 1.5, threads: null, pending_requests: 0, timed_out: false })],
+    ['no pending_requests', ok({ cursor: 0, threads: null, timed_out: false })],
+    ['threads that are not a list', ok({ cursor: 0, threads: 'th1', pending_requests: 0, timed_out: false })],
   ])('backs off on an answer it cannot read (%s), neither ending nor spinning', async (_, unreadable) => {
     const { node, log, watcher } = setup()
     watcher.sync(['acct-1'])
