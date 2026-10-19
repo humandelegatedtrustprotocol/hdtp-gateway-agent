@@ -4,6 +4,7 @@
 import { toStandardSchema } from '@mastra/core/schema'
 import { describe, expect, it } from 'vitest'
 import { nodeClientOver, type NodeClient } from '../src/hdtp/node.ts'
+import { FRAME } from '../src/hdtp/prompt.ts'
 import { FIRST_TURNS, MAX_ATTEMPTS, Responder, type Draft, type Rules } from '../src/hdtp/responder.ts'
 import { FILLED_BY_CODE, Turns, names, readyReplies, turnSchema } from '../src/hdtp/turn.ts'
 import { FakeNode, TOOLS, ask, memoryLog, none, notify, reply, rules, surface } from './fakes.ts'
@@ -446,6 +447,20 @@ describe('the turn as the model wrote it', () => {
     const label = JSON.parse(ask('Pick a day', { Slots: 'Tue' }, ['Tuesday'])) as { ask: { surface: Array<Record<string, any>> } }
     label.ask.surface[1]!.updateComponents.components.find((c: { id: string }) => c.id === 'own').label = null
     await expect(turns.read(JSON.stringify(label), FIRST_TURNS)).rejects.toMatchObject({ code: 'invalid_turn' })
+  })
+
+  it('takes the Send Button the frame describes, and refuses one whose event is named "reply"', async () => {
+    const node = new FakeNode()
+    const turns = new Turns(nodeClientOver(node.call, node.catalog))
+    // The frame's example name for the event of the Button that sends the owner's own words.
+    expect(FRAME).toContain('event has a name other than "reply" (for example "own")')
+    const own = JSON.parse(ask('Pick a day', { Slots: 'Tue' }, ['Tuesday works for me.'])) as { ask: { surface: Array<Record<string, any>> } }
+    const send = () => own.ask.surface[1]!.updateComponents.components.find((c: { id: string }) => c.id === 'send')
+    expect(send().action.event.name).toBe('own')
+    await expect(turns.read(JSON.stringify(own), FIRST_TURNS)).resolves.toMatchObject({ type: 'ask' })
+    // As the model wrote it in two of five eval runs: the node's schema keeps "reply" for ready replies.
+    send().action.event = { name: 'reply', context: { reply: { path: '/own' } } }
+    await expect(turns.read(JSON.stringify(own), FIRST_TURNS)).rejects.toMatchObject({ code: 'invalid_turn' })
   })
 
   it('keeps a null where the node’s schema takes one', async () => {

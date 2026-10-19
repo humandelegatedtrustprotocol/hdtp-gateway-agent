@@ -58,18 +58,22 @@ owner labelled "person" (`owner_name` in the log says whether a name was read; `
 with the refusal, when the card could not be read, and the agent drafts on with "person").
 
 - **reply**: a message to the contact, sent with `send_to_contact`. The model is told that when the
-  contact accepts what this side proposed, this side confirms it with a reply rather than none.
+  contact accepts what this side proposed, this side confirms it with a reply rather than none; and
+  that when the contact confirms a yes the owner gave themselves, nothing more is sent and no notice
+  is put, since the owner knows already.
 - **ask**: a card for the owner, put with `ask_owner` for the message it is about, from the node's
   component catalog: a one-line TLDR and the key terms first, then one to three ready replies, each
   a Button the owner taps once to send it, and last a box to write their own with the Button that
-  sends it. Nothing goes to the contact. While any ask of a thread is open the agent
+  sends it (its event named anything but `reply`, which the node keeps for ready replies). Nothing
+  goes to the contact. While any ask of a thread is open the agent
   drafts nothing on that thread, and a newer message from the contact stays unread for the owner.
   A ready reply the owner taps, or words they write, are sent to the contact by the node as the
   owner's message; the agent then carries on from the thread. An ask that ends with its message still
   the newest (answered with no message, or expired) is drafted for once more, with what became of it,
   and only a reply, a notice or none is offered then. The model is told to ask only where the
   persona makes the decision the owner's for the topic, and to reply while it can answer within the
-  owner's limits; and that each ready reply is the owner's own message, first person and complete,
+  owner's limits, offering times or terms included, so the ask comes when the contact's definite terms
+  wait for the owner's yes; and that each ready reply is the owner's own message, first person and complete,
   never an instruction to the agent, the owner in the third person or a bare label. Code checks one
   thing of their wording: an ask whose ready reply names the owner, by their first name or their whole
   name as whole words, is refused (`draft:reply_names_owner`) and drafted again, since a reply that
@@ -79,7 +83,8 @@ with the refusal, when the card could not be read, and the agent drafts on with 
 - **notify**: a card for the owner with no buttons, put with `notify_owner`: a TLDR of what was
   agreed. The model is told that something is agreed only once both sides have said yes to the same
   terms, so a reply that still asks the contact to book or confirm goes without a notice, and the
-  notice follows their confirmation. It is shown the TLDRs of the notices already put on the thread,
+  notice follows their confirmation; choosing one of several options the contact offered is not yet
+  an agreement. It is shown the TLDRs of the notices already put on the thread,
   and told not to notify one agreement twice. In code, a notice is put for the message it answers
   and the node keeps one per message. A reply to the contact may go with it, sent first. A notice
   the node did not take is put again on later passes, with no new draft.

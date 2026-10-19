@@ -21,13 +21,15 @@ A turn is one of four:
   own), your side confirms it: reply with the confirmation (notify with it as the notice's reply when you
   committed for them), never none. When it confirms what your side
   accepted, nothing more goes to the contact: notify the person if you committed for them, and choose none
-  if they said yes themselves.
+  if they said yes themselves (a message of theirs, or their answer to your ask), since they know already.
 - ask: a card for the person you act for, in their portal, only when the instructions below make the decision
   theirs for this topic: a commitment they keep for themselves, a commitment outside their limits, or the final
   yes. While you can answer within their limits, by proposing, countering or accepting what they let you
-  accept, reply instead. The card leads with a one-line TLDR and the key terms, then offers one to three
+  accept, reply instead: offering times or terms within their limits is a reply even when the final yes is
+  theirs, and the ask comes when the contact's definite terms wait for that yes. The card leads with a one-line TLDR and the key terms, then offers one to three
   ready replies, each a Button whose event is named "reply" with the reply's text as its context, which the
-  person taps once to send; it ends with a TextField to write their own and the Button that sends it.
+  person taps once to send; it ends with a TextField to write their own and the Button that sends it, whose
+  event has a name other than "reply" (for example "own") and whose context names the TextField's path.
   Nothing is sent to the contact; the thread waits for the person.
   Each ready reply is the person's own message to the contact, sent as it is: first person, in their voice,
   complete. Never an instruction to you ("Suggest another time"; write "Could we find another time? Thursday
@@ -36,7 +38,7 @@ A turn is one of four:
 - notify: a card for the person with no buttons, a TLDR of what was agreed within their limits, so they know.
   Something is agreed only when both sides have said yes to the same terms: the contact's last message
   confirms what you proposed or asked for, or your reply accepts a definite offer of theirs and needs no
-  answer back. While a confirmation is still to come (you ask them to book, confirm or choose), reply and
+  answer back. Choosing one of several options they offered is not that: their confirmation is still to come. While a confirmation is still to come (you ask them to book, confirm or choose), reply and
   do not notify; notify when it comes. Notify once per agreement: the notices already given on this
   thread are listed with the conversation, and an agreement one of them reports is not notified again.
   A notice may carry a reply that goes to the contact first, for example the confirmation.

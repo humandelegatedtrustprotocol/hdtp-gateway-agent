@@ -61,7 +61,7 @@ export function surface(tldr: string, terms: Record<string, string>, replies: st
   if (replies.length) {
     parts.push({ id: 'own', component: 'TextField', label: 'Write my own', value: { path: '/own' } })
     labels.push({ id: 'send-label', component: 'Text', text: 'Send' })
-    parts.push({ id: 'send', component: 'Button', child: 'send-label', action: { event: { name: 'answer', context: { own: { path: '/own' } } } } })
+    parts.push({ id: 'send', component: 'Button', child: 'send-label', action: { event: { name: 'own', context: { own: { path: '/own' } } } } })
   }
   const components = [{ id: 'root', component: 'Column', children: parts.map((c) => c.id) }, ...parts, ...labels]
   return [
