@@ -156,7 +156,19 @@ export function nodeClientOver(call: CallTool): NodeClient {
     },
     async waitForUpdates(accountId, since, signal) {
       const args = since === undefined ? { account_id: accountId } : { account_id: accountId, since }
-      return (await json('wait_for_updates', args, signal)) as WaitAnswer
+      const answer = (await json('wait_for_updates', args, signal)) as Partial<WaitAnswer> | null
+      // The loop takes its next cursor from this answer: one it cannot read is a failed wait, not a
+      // start from nothing.
+      if (
+        typeof answer?.cursor !== 'number' ||
+        !Number.isInteger(answer.cursor) ||
+        answer.cursor < 0 ||
+        typeof answer.pending_requests !== 'number' ||
+        !(answer.threads === null || Array.isArray(answer.threads))
+      ) {
+        throw new NodeRefusal('wait_for_updates', 'unreadable_answer')
+      }
+      return answer as WaitAnswer
     },
   }
 }

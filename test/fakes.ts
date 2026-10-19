@@ -32,12 +32,12 @@ interface Thread {
   readThrough: number
 }
 
-interface ToolAnswer {
+export interface ToolAnswer {
   isError?: boolean
   content: Array<{ type: 'text'; text: string }>
 }
 
-const ok = (v: unknown): ToolAnswer => ({ content: [{ type: 'text', text: JSON.stringify(v) }] })
+export const ok = (v: unknown): ToolAnswer => ({ content: [{ type: 'text', text: JSON.stringify(v) }] })
 const refusal = (code: string, extra: Record<string, unknown> = {}): ToolAnswer => ({
   isError: true,
   content: [{ type: 'text', text: JSON.stringify({ code, detail: 'refused', ...extra }) }],
@@ -57,6 +57,8 @@ export class FakeNode {
   holdMs = 25_000
   /** Set to make the next wait_for_updates answer that its cursor expired. */
   expireNext = false
+  /** Set to make every wait_for_updates answer this, at once, in place of the node's answer. */
+  waitAnswer: ToolAnswer | undefined
   /** Messages recorded outbound, one per msg_id, as the node records them. */
   sent: Array<{ account_id: string; contact_fpr: string; thread_id: string; msg_id: string; text: string }> = []
   answered: Array<{ request_id: string; result: string }> = []
@@ -194,7 +196,7 @@ export class FakeNode {
       }
       case 'wait_for_updates':
         this.waits.push({ account: acct, since: args.since as number | undefined })
-        return this.wait(acct, args.since as number | undefined)
+        return this.waitAnswer ?? this.wait(acct, args.since as number | undefined)
       default:
         return refusal('not_found')
     }

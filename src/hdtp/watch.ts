@@ -6,20 +6,21 @@
 // (`no_agent`). The node holds each wait_for_updates call for at most 25 s (ownermcp WaitMaxSec),
 // so a loop of them keeps the agent attached however long the sweep's interval is.
 //
-// The first answer, an answer that is news (not timed_out) naming a thread or a waiting request,
-// and one that says the cursor expired each start one pass over the account
-// (Responder.reconcileAccount): the answer carries neither a thread's contact status nor a
-// request's id, and the pass reads both. The pass runs beside the loop, never in it: a draft makes
-// no request to the node while the model writes, and a loop that waited on it would let the agent
-// drop out of presence for as long as the model took. A pass asked for while one runs makes it run
-// once more.
+// Three answers start one pass over the account (Responder.reconcileAccount): the first, one that
+// says the cursor expired, and news (not timed_out) that names a thread or reports
+// pending_requests above zero. pending_requests is a standing total, so while a request waits,
+// every news answer starts a pass, one naming no thread included. The answer carries neither a
+// thread's contact status nor a request's id, and the pass reads both. The pass runs beside the
+// loop, never in it: a draft makes no request to the node while the model writes, and a loop that
+// waited on it would let the agent drop out of presence for as long as the model took. A pass
+// asked for while one runs makes it run once more.
 //
 // The runtime's stop function stops the loops; the tests use it. A process that ends (Mastra's
 // server exits on SIGTERM) ends its held wait with it.
 //
-// A failed wait is retried after a delay that doubles from BACKOFF_MIN_MS to BACKOFF_MAX_MS, with
-// the cursor kept. The sweep (HDTP_RECONCILE_SECONDS) stays the safety net under the loop and the
-// webhook.
+// A failed wait, an answer the client cannot read among them (NodeClient.waitForUpdates), is
+// retried after a delay that doubles from BACKOFF_MIN_MS to BACKOFF_MAX_MS, with the cursor kept.
+// The sweep (HDTP_RECONCILE_SECONDS) stays the safety net under the loop and the webhook.
 
 import type { Log } from './log.ts'
 import { refusalCode, type NodeClient } from './node.ts'
@@ -28,7 +29,10 @@ export const BACKOFF_MIN_MS = 1_000
 /** Under the node's one-minute presence window, so a node that comes back sees the agent soon. */
 export const BACKOFF_MAX_MS = 30_000
 
-/** What the loop wakes: a pass over one account. It logs its own failures and never rejects. */
+/**
+ * What the loop wakes: a pass over one account. It logs its own failures and is not meant to
+ * reject; a rejection is logged as `watch_pass_failed`.
+ */
 export type Pass = (accountId: string) => Promise<void>
 
 export function backoff(failures: number): number {
@@ -98,28 +102,26 @@ export class Watcher {
     let cursor: number | undefined
     let failures = 0
     while (!signal.aborted) {
-      let answer
       try {
-        answer = await this.node.waitForUpdates(accountId, cursor, signal)
+        const answer = await this.node.waitForUpdates(accountId, cursor, signal)
+        failures = 0
+        const first = cursor === undefined
+        cursor = answer.cursor
+        if (answer.cursor_expired) {
+          this.log.info('watch_cursor_expired', { account_id: accountId })
+          this.wake(accountId)
+        } else if (first) {
+          // The node answered at once with a cursor and no backlog. One pass covers what arrived
+          // before the cursor, so it is not left to the next sweep.
+          this.wake(accountId)
+        } else if (!answer.timed_out && ((answer.threads?.length ?? 0) > 0 || answer.pending_requests > 0)) {
+          this.wake(accountId)
+        }
       } catch (e) {
         if (signal.aborted) return
         failures++
         this.log.warn('watch_failed', { account_id: accountId, reason: refusalCode(e), attempt: failures })
         await sleep(backoff(failures), signal)
-        continue
-      }
-      failures = 0
-      const first = cursor === undefined
-      cursor = answer.cursor
-      if (answer.cursor_expired) {
-        this.log.info('watch_cursor_expired', { account_id: accountId })
-        this.wake(accountId)
-      } else if (first) {
-        // The node answered at once with a cursor and no backlog. One pass covers what arrived
-        // before the cursor, so it is not left to the next sweep.
-        this.wake(accountId)
-      } else if (!answer.timed_out && ((answer.threads?.length ?? 0) > 0 || answer.pending_requests > 0)) {
-        this.wake(accountId)
       }
     }
   }
@@ -139,6 +141,10 @@ export class Watcher {
           state.again = false
           await this.pass(accountId)
         } while (state.again && !this.stopped)
+      } catch (e) {
+        // A pass that broke its promise not to reject ends here, by its code: a rejection nothing
+        // caught would end the process. The next answer that is news starts another.
+        this.log.warn('watch_pass_failed', { account_id: accountId, reason: refusalCode(e) })
       } finally {
         this.passes.delete(accountId)
       }

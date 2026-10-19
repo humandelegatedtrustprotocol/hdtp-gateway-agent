@@ -29,6 +29,18 @@ function hdtpEnv(url: string): Record<string, string> {
   }
 }
 
+/** How much of the dev process's output a failing run prints. */
+const OUTPUT_KEPT = 20_000
+
+/** Signals a process group, which may be gone already. */
+function kill(group: number, signal: NodeJS.Signals): void {
+  try {
+    process.kill(group, signal)
+  } catch {
+    // already gone
+  }
+}
+
 async function until(ready: () => Promise<boolean>, ms: number): Promise<void> {
   const end = Date.now() + ms
   while (Date.now() < end) {
@@ -47,11 +59,20 @@ describe("the CLI's reading of the entry file", () => {
     // .mastra and dev lock apart from a `mastra dev` the developer has running.
     mkdirSync('.mastra', { recursive: true })
     const root = resolve(mkdtempSync(join('.mastra', 'cli-test-')))
+    // Its own process group, so the kill below reaches the CLI and the process it serves. A vitest
+    // that is itself killed runs no finally, and leaves that group running.
     const dev = spawn('npx', ['mastra', 'dev', '--root', root, '--dir', resolve('src/mastra')], {
       env: { ...process.env, ...hdtpEnv(url), PORT: String(port) },
       detached: true,
-      stdio: 'ignore',
+      stdio: ['ignore', 'pipe', 'pipe'],
     })
+    let output = ''
+    const keep = (chunk: Buffer) => {
+      output = (output + chunk.toString()).slice(-OUTPUT_KEPT)
+    }
+    dev.stdout!.on('data', keep)
+    dev.stderr!.on('data', keep)
+    const exited = new Promise((r) => dev.once('exit', r))
     try {
       await until(async () => {
         try {
@@ -65,13 +86,13 @@ describe("the CLI's reading of the entry file", () => {
       await new Promise((r) => setTimeout(r, 2_000))
       expect(node.waits.filter((w) => w.since === undefined)).toEqual([{ account: 'acct-1', since: undefined }])
       expect(node.calls.filter((c) => c === 'list_accounts')).toHaveLength(1)
+    } catch (e) {
+      console.error(`mastra dev's output (its last ${OUTPUT_KEPT} characters):\n${output}`)
+      throw e
     } finally {
-      try {
-        process.kill(-dev.pid!, 'SIGTERM')
-      } catch {
-        // already gone
-      }
-      await Promise.race([new Promise((r) => dev.once('exit', r)), new Promise((r) => setTimeout(r, 10_000))])
+      kill(-dev.pid!, 'SIGTERM')
+      const gone = await Promise.race([exited.then(() => true), new Promise((r) => setTimeout(() => r(false), 10_000))])
+      if (!gone) kill(-dev.pid!, 'SIGKILL')
       rmSync(root, { recursive: true, force: true })
       server.closeAllConnections()
       await new Promise<void>((r) => server.close(() => r()))
