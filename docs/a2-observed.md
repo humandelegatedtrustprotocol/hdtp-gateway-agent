@@ -59,13 +59,14 @@ Ben typed a message in his portal's Inbox and pressed Send. The message is label
 | 547.460 – 547.487 | owner node | `list_accounts`, `get_inbox`, `read_thread` over the owner MCP |
 | 549.363 | contact node | the reply arrives from Ana's node |
 | 549.366 | owner node | `send_to_contact ok`; agent `replied` |
-| 549.441 | Ben's portal | the reply is in the conversation, labelled `agent` |
+| 549.441 | Ben's portal | the reply is in `/api/conversations`, labelled `agent` |
 
-From the click to the reply on Ben's screen: **2.0 s**. Of that, about 1.88 s lies between
-`read_thread` returning and `send_to_contact` returning. That span holds the OpenRouter draft and
-the delivery to Ben's node. The webhook hop, from the message stored to the agent accepting the
-signed post, took 4 ms. A screenshot of Ben's Inbox showed the reply under his message with its
-`agent` badge.
+From the click to the reply in the conversation data Ben's Messages page renders from: **2.0 s**.
+That is the 100 ms poll, not the screen. A screenshot of Ben's Inbox, taken about 1.5 s after the
+poll saw the reply, showed it under his message with its `agent` badge. Of the 2.0 s, about
+1.88 s lies between `read_thread` returning and `send_to_contact` returning. That span holds the
+OpenRouter draft and the delivery to Ben's node. The webhook hop, from the message stored to the
+agent accepting the signed post, took 4 ms.
 
 ## (b) The turn cap, with the contact's side an agent
 
@@ -83,7 +84,8 @@ with `sender: agent`.
 | 4 (agent) | no reply in 30 s | `agent_turn_cap turns:3`, 10 ms after `webhook_accepted` |
 
 The fourth message drew no model call. Ben then wrote in his portal, a `human` message, and the
-count started again: a reply appeared on his screen 2.74 s after the click.
+count started again: the reply was in `/api/conversations`, by the same 100 ms poll as in (a),
+2.74 s after the click.
 
 ## (c) A missed webhook, answered by the reconcile pass
 
