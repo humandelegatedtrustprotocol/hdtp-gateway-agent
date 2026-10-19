@@ -54,7 +54,8 @@ not treated as one still to come. Their answers to the thread's earlier asks are
 their decisions too. The node gives the agent no display name for its owner, so the model knows the
 owner by role, and by the name the persona uses.
 
-- **reply**: a message to the contact, sent with `send_to_contact`.
+- **reply**: a message to the contact, sent with `send_to_contact`. The model is told that when the
+  contact accepts what this side proposed, this side confirms it with a reply rather than none.
 - **ask**: a card for the owner, put with `ask_owner` for the message it is about, from the node's
   component catalog: a one-line TLDR and the key terms first, one to three ready replies, and a box
   to write their own last. Nothing goes to the contact. While any ask of a thread is open the agent
@@ -62,7 +63,11 @@ owner by role, and by the name the persona uses.
   A ready reply the owner taps, or words they write, are sent to the contact by the node as the
   owner's message; the agent then carries on from the thread. An ask that ends with its message still
   the newest (answered with no message, or expired) is drafted for once more, with what became of it,
-  and only a reply, a notice or none is offered then.
+  and only a reply, a notice or none is offered then. The model is told to ask only where the
+  persona makes the decision the owner's for the topic, and to reply while it can answer within the
+  owner's limits; and that each ready reply is the owner's own message, first person and complete,
+  never an instruction to the agent, the owner in the third person or a bare label. Code does not
+  check the ready replies' wording: they sit in the node's components, which the agent does not name.
 - **notify**: a card for the owner with no buttons, put with `notify_owner`: a TLDR of what was
   agreed. The model is told that something is agreed only once both sides have said yes to the same
   terms, so a reply that still asks the contact to book or confirm goes without a notice, and the
