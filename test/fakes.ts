@@ -324,8 +324,11 @@ export class FakeNode {
           th.readThrough = th.messages.length
           this.change(acct, { thread_id: args.thread_id as string })
         }
-        if (this.undelivered) return refusal('unavailable', { ThreadID: args.thread_id, Status: 'pending' })
-        return ok({ ThreadID: args.thread_id, Status: 'pending' })
+        // The node's answer (ownermcp sendAnswer): the status, the msg_id as message_id, the thread.
+        // Recorded and not delivered, it is a tool error carrying the same three beside its code.
+        const answer = { message_id: args.msg_id, thread_id: args.thread_id }
+        if (this.undelivered) return refusal('unavailable', { status: 'pending', ...answer })
+        return ok({ status: 'delivered', ...answer })
       }
       case 'list_pending':
         return ok(this.pending.filter((p) => p.Status === 'open'))

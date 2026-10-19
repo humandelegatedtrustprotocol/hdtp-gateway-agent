@@ -61,6 +61,60 @@ describe('the owner MCP over the wire', () => {
     }
   })
 
+  it('takes send_to_contact’s refusal as recorded only when it carries the message and its thread', () => {
+    const answer = (v: Record<string, unknown>) => ({ isError: true, content: [{ type: 'text', text: JSON.stringify({ code: 'unavailable', detail: 'refused', ...v }) }] })
+    const recorded = (v: Record<string, unknown>, tool = 'send_to_contact') => {
+      try {
+        decodeAnswer(tool, answer(v))
+      } catch (e) {
+        return (e as NodeRefusal).recorded
+      }
+    }
+    const sent = { status: 'pending', message_id: 'agent-reply-1', thread_id: 'th1' }
+    expect(recorded(sent)).toBe(true)
+    expect(recorded({ ...sent, status: 'failed' })).toBe(true)
+    expect(recorded({ ...sent, message_id: '' })).toBe(false)
+    expect(recorded({ status: 'pending', thread_id: 'th1' })).toBe(false)
+    expect(recorded({ ...sent, thread_id: '' })).toBe(false)
+    expect(recorded({ status: 'pending', message_id: 'agent-reply-1' })).toBe(false)
+    expect(recorded(sent, 'ask_owner')).toBe(false)
+    // The shape the node answered before #234: Go's field names, no message id.
+    expect(recorded({ ThreadID: 'th1', Status: 'pending' })).toBe(false)
+  })
+
+  it('counts a send the node recorded and has yet to deliver as sent, and one it refused as refused, over the wire', async () => {
+    // A node of its own, so its undelivered sends reach no other test.
+    const own = new FakeNode()
+    own.thread('th-send')
+    own.inbound('th-send', 'lunch?')
+    const served = await serve(own)
+    const { node: client, disconnect } = connectNode(served.url, TOKEN)
+    const send = (msg_id: string, thread_id = 'th-send') => client.sendToContact({ account_id: 'acct-1', contact_fpr: 'fpr-contact', thread_id, msg_id, text: 'Yes.' })
+    try {
+      await expect(send('m-delivered')).resolves.toBeUndefined()
+      own.undelivered = true
+      await expect(send('m-recorded')).resolves.toBeUndefined()
+      expect(own.sent.map((s) => s.msg_id)).toEqual(['m-delivered', 'm-recorded'])
+      await expect(send('m-nowhere', 'th-none')).rejects.toMatchObject({ tool: 'send_to_contact', code: 'not_found', recorded: false })
+    } finally {
+      await disconnect()
+      served.server.closeAllConnections()
+      await new Promise<void>((r) => served.server.close(() => r()))
+    }
+  })
+
+  it('answers send_to_contact in exactly the node’s fields', async () => {
+    const own = new FakeNode()
+    own.thread('th-shape')
+    const args = { account_id: 'acct-1', contact_fpr: 'fpr-contact', thread_id: 'th-shape', msg_id: 'm-1', text: 'Yes.' }
+    const text = async () => JSON.parse((await own.call('send_to_contact', args)).content[0]!.text) as Record<string, unknown>
+    expect(await text()).toEqual({ status: 'delivered', message_id: 'm-1', thread_id: 'th-shape' })
+    own.undelivered = true
+    const refused = await own.call('send_to_contact', args)
+    expect(refused.isError).toBe(true)
+    expect(Object.keys(await text()).sort()).toEqual(['code', 'detail', 'message_id', 'status', 'thread_id'])
+  })
+
   it('calls the tools by name with the bearer token, and reads refusals by code', async () => {
     node.thread('th1')
     node.inbound('th1', 'hello')
