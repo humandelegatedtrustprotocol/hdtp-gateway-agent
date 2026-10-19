@@ -62,6 +62,6 @@ mastra.setServerMiddleware([{ path: '*', handler: studioHostsOnly }])
 
 // Statements, not bindings the `server` option refers to: see src/hdtp/runtime.ts. After the
 // Mastra instance, whose observability records the runtime's spans and lines.
-const { log, trace } = observe(mastra)
-startRuntime(readConfig(), delegate, log, trace)
+const { log, trace, fail } = observe(mastra)
+startRuntime(readConfig(), delegate, log, trace, fail)
 startSweep(mastra.getStorage()!, log)

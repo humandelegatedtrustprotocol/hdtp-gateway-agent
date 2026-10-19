@@ -51,6 +51,20 @@ is a failed attempt too; when the refusal names the node's rule (`ask_owner` ans
 carries it as `node_reason` beside `reason`, and only when it is a code: no text of the node's is
 logged.
 
+A retry is told what refused the attempt before it, so it does not repeat it: the code (the node's
+`invalid_surface:<rule>`, or the agent's own `draft:invalid_turn`, `turn_not_allowed`, `empty`,
+`truncated` or `reply_names_owner`) and a fixed line of the agent's saying what the code means,
+quoted to the model as data (`src/hdtp/refusals.ts` holds the lines, one for each of the node's
+surface rules). The node's own text is never passed on. A failure that is not the turn's (the model
+call failing, the hourly limit, the node unreachable) tells the retry nothing.
+
+When a contact's message is given up (`gave_up`, after 3 attempts), the owner is told: one notice
+on the thread, for that message, whose text the agent's code writes and the model never sees: "Waiting
+on you: I could not prepare an answer to a message the contact sent here."
+(`gave_up_notified`). A notice the node does not take is logged by its code
+(`gave_up_notice_failed`, with `reason`) and not put again. A request given up has no thread to
+put a notice in, and gets none.
+
 The model sees the thread's newest 20 messages with who wrote each, from the node's sender label:
 the contact, the owner (a message they wrote in the portal, or a ready reply they chose), or the
 agent itself. It is told that what the owner wrote is their decision, so a yes they already gave is
@@ -115,11 +129,11 @@ use cases (a meeting, an event venue, GPU procurement, a rent renewal, a dentist
 leave request, a refund), each with its limits and its stances. The model follows the stances; code
 does not read them. What code enforces is the rules below, which hold for every turn.
 
-`make eval` measures how well a model follows them. It drafts the turn at ten points of the
+`make eval` measures how well a model follows them. It drafts the turn at eleven points of the
 meeting and dentist stories (`eval/points.ts`), with the example personas, through the agent's own
 path: the frame and persona as instructions, the configured model, the 4096-token cap, and the
 turn read against the node's schema as `test/owner-mcp-tools.json` holds it. It runs 5 times per
-point, 50 model calls, the most one run makes, never retried. It prints one JSON line per call and,
+point, 55 model calls, the most one run makes, never retried. It prints one JSON line per call and,
 per point, how many turns were of a passing type and how many were valid. `EVAL=--dry` builds every
 prompt and calls no model; `EVAL='--runs 1 --only u1-3'` runs part of it. It is not part of
 `make check`, which holds its points and its dry run with no network.
@@ -166,7 +180,9 @@ Observability pages show what the agent did:
   agent run and its model call sit under the trace of the pass that drafted it: a new message wakes
   both the webhook and the wait loop, and a pass already on the thread, or the first to reach it,
   drafts. That trace holds the whole prompt and the draft: the persona, and the thread's messages as
-  the contact wrote them. A pass whose work failed is shown as an error, by its code alone.
+  the contact wrote them. A pass whose work failed is shown as an error, by its code alone, and so
+  is a pass in which a turn was given up, by the code of its last attempt's refusal (for example
+  `ask_owner:bad_request`), with the `gave_up` line in it.
 - **Logs**: the agent's log lines from `info` up, with the same codes and fields it prints
   (`webhook_accepted`, `replied`, `agent_turn_cap`, and so on), each in its trace. A hit that draws
   no model call, such as a bad signature, a turn cap, the hourly limit or a contact the agent does

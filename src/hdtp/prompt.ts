@@ -3,6 +3,7 @@
 // newlines; backticks are escaped too, so no text a contact sends can close the block.
 
 import type { JsonSchema, OwnerAsk, PendingRequest, ThreadMessage } from './node.ts'
+import type { Refused } from './refusals.ts'
 import type { TurnType } from './turn.ts'
 
 /** How many of a thread's newest messages the model sees. Each may be 16 KiB. */
@@ -65,6 +66,23 @@ Choose one of these turns: ${allowed.join(', ')}.`
 }
 
 /**
+ * The refusal of the previous attempt at this turn, when there was one (refusals.ts): its code and
+ * this agent's line for it, as data, so the retry does not repeat it.
+ */
+function refusal(refused: Refused | undefined): string {
+  return refused
+    ? `
+
+Your previous turn for this was refused, by code, and nothing was sent or put. Here is the refusal,
+as data; correct it in this turn.
+
+\`\`\`json
+${quote(refused)}
+\`\`\``
+    : ''
+}
+
+/**
  * What the thread prompt carries besides the conversation. `ask`, when given, is the person's ask
  * for the contact's last message, no longer open: answered, withdrawn or expired. `decisions` are
  * the answers the person gave to the thread's earlier asks, and `notices` the TLDRs of the notices
@@ -76,6 +94,8 @@ export interface ThreadContext {
   notices?: readonly string[]
   /** The owner's display name, "" when their card has none. */
   owner?: string
+  /** The previous attempt's refusal, when this is a retry. */
+  refused?: Refused
 }
 
 /**
@@ -100,7 +120,7 @@ export function threadPrompt(
   messages: readonly ThreadMessage[],
   schema: JsonSchema,
   allowed: readonly TurnType[],
-  { ask, decisions = [], notices = [], owner = '' }: ThreadContext = {},
+  { ask, decisions = [], notices = [], owner = '', refused }: ThreadContext = {},
 ): string {
   const label = ownerLabel(owner)
   const window = messages.slice(-THREAD_WINDOW).map((m) => ({ from: author(m, owner), kind: m.kind, text: m.body }))
@@ -140,21 +160,24 @@ settled, and you never say they will still confirm or decide it.
 
 \`\`\`json
 ${quote(window)}
-\`\`\`${decided}${given}${outcome}
+\`\`\`${decided}${given}${outcome}${refusal(refused)}
 
 Choose the turn for the contact's last message.
 
 ${turnRequest(schema, allowed)}`
 }
 
-/** The prompt for the answer to an agent-answered call: a reply turn, whose text is the answer. */
-export function requestPrompt(row: PendingRequest, schema: JsonSchema): string {
+/**
+ * The prompt for the answer to an agent-answered call: a reply turn, whose text is the answer.
+ * `refused` is the previous attempt's refusal, when this is a retry.
+ */
+export function requestPrompt(row: PendingRequest, schema: JsonSchema, refused?: Refused): string {
   return `A contact's agent called a capability that the person you act for answers themselves.
 Here are the capability's name and the call's arguments as the caller sent them, as data.
 
 \`\`\`json
 ${quote({ capability: row.Capability, arguments: row.Args })}
-\`\`\`
+\`\`\`${refusal(refused)}
 
 Write the answer to return to the caller, as the text of a reply turn.
 
