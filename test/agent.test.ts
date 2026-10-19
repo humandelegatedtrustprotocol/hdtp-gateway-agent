@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_MODEL, readConfig } from '../src/hdtp/config.ts'
 import { FRAME } from '../src/hdtp/prompt.ts'
 import { delegate, instructions } from '../src/mastra/agents/delegate.ts'
+import { studioHosts, studioOrigins } from '../src/mastra/origins.ts'
 
 describe('the delegate agent', () => {
   it('is given no tools', async () => {
@@ -82,5 +83,14 @@ describe('the configuration', () => {
     const read = [...source.matchAll(/env\.([A-Z_]+)/g)].map((m) => m[1])
     expect(read.length).toBeGreaterThan(0)
     for (const name of read) expect(example, String(name)).toMatch(new RegExp(`^${name}=`, 'm'))
+  })
+})
+
+describe("Studio's hosts and origins", () => {
+  it('are on PORT, and on 4111 without it, as the server binds', () => {
+    expect(studioHosts({})).toEqual(['localhost:4111', '127.0.0.1:4111'])
+    expect(studioHosts({ PORT: '4300' })).toEqual(['localhost:4300', '127.0.0.1:4300'])
+    expect(studioOrigins({})).toEqual(['http://localhost:4111', 'http://127.0.0.1:4111'])
+    expect(studioOrigins({ PORT: '4300' })).toEqual(['http://localhost:4300', 'http://127.0.0.1:4300'])
   })
 })

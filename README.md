@@ -19,11 +19,11 @@ The node holds each wait for at most 25 s, so the loop keeps the agent attached 
 `docs/a2-observed.md` records runs against two real nodes.
 
 It needs a node whose owner MCP `read_thread` gives each message its `message_id`
-([hdtp-gateway#208](https://github.com/humandelegatedtrustprotocol/hdtp-gateway/issues/208)):
-hdtp-gateway v0.3.0 or later. v0.2.0 and earlier give none, and the agent answers no thread of
-theirs (`message_id_missing` in its log). Each reply is sent under a `msg_id` derived from
-the id of the message it answers, so every path that reaches one message, in any process, sends one
-reply, which the node records once.
+([hdtp-gateway#208](https://github.com/humandelegatedtrustprotocol/hdtp-gateway/issues/208)): the
+first hdtp-gateway release after v0.2.0, which carries #208 (v0.3.0 is planned). v0.2.0 and earlier
+give none, and the agent answers no thread of theirs (`message_id_missing` in its log). Each reply
+is sent under a `msg_id` derived from the id of the message it answers, so every path that reaches
+one message, in any process, sends one reply, which the node records once.
 
 ## What it answers, and what it leaves to the owner
 
@@ -51,7 +51,7 @@ Work in progress: the full README follows.
 ```sh
 cp .env.example .env   # then fill it in
 npm ci
-npm run dev            # Mastra Studio at http://localhost:4111 (this machine only)
+npm run dev            # Mastra Studio at http://localhost:4111 (this machine only; PORT moves it)
 make check             # typecheck, tests, build
 ```
 

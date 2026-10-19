@@ -1,5 +1,5 @@
-// The two addresses Studio is opened at, and the two rules that keep every other page off this
-// server. Studio and Mastra's /api routes ask for no credential.
+// The two addresses Studio is opened at, on the port this server binds, and the two rules that
+// keep every other page off this server. Studio and Mastra's /api routes ask for no credential.
 //
 // The host. A page whose own name its DNS later points at 127.0.0.1 (DNS rebinding) is of the same
 // origin as this server, so neither CORS nor the origin rule below keeps the answers from it: the
@@ -17,24 +17,30 @@
 // Mastra runs no middleware on routes declared public, so neither rule reaches them:
 // - /hdtp/webhook, whose signature is checked, so the node may name any host (http://agent:4111
 //   inside a compose project, say);
-// - Mastra's sign-in routes, which do nothing without an auth provider (this agent has none);
+// - Mastra's sign-in routes, which refuse every request without an auth provider (404 "not
+//   configured", 400 for a malformed body; this agent has no provider);
 // - under `mastra dev`, Studio's /refresh-events and /__hot-reload-status, which answer a
 //   "connected" event and the hot-reload flag, nothing of the agent's.
 
 import type { MiddlewareHandler } from '@mastra/core/server'
 
 /**
- * The port the server listens on, read as Mastra's createNodeServer reads it: `server.port` (this
- * project sets none), else PORT, else 4111. `mastra dev` sets PORT, for the process it serves, to
- * the port it chose: 4111 when that is free.
+ * Studio's two addresses, as a Host header names them, on the port the served process binds. That
+ * is Mastra's own rule with no `server.port` set, as here: PORT, else 4111. `mastra dev`, given no
+ * PORT, picks the first free port from 4111 to 4131 and hands it to the served process as PORT.
  */
-export const STUDIO_PORT = Number(process.env.PORT) || 4111
-
-/** Studio's two addresses, as a Host header names them. */
-export const STUDIO_HOSTS = [`localhost:${STUDIO_PORT}`, `127.0.0.1:${STUDIO_PORT}`]
+export function studioHosts(env: NodeJS.ProcessEnv = process.env): string[] {
+  const port = Number(env.PORT) || 4111
+  return [`localhost:${port}`, `127.0.0.1:${port}`]
+}
 
 /** Studio's two origins: the same two addresses. */
-export const STUDIO_ORIGINS = STUDIO_HOSTS.map((host) => `http://${host}`)
+export function studioOrigins(env: NodeJS.ProcessEnv = process.env): string[] {
+  return studioHosts(env).map((host) => `http://${host}`)
+}
+
+export const STUDIO_HOSTS = studioHosts()
+export const STUDIO_ORIGINS = studioOrigins()
 
 const READS = new Set(['GET', 'HEAD', 'OPTIONS'])
 
