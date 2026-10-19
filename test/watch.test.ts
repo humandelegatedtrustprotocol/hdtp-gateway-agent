@@ -3,10 +3,10 @@
 // these tests read the clock at every call the FakeNode answers.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { nodeClientOver } from '../src/hdtp/node.ts'
+import { NodeRefusal, nodeClientOver } from '../src/hdtp/node.ts'
 import { Responder, type Draft } from '../src/hdtp/responder.ts'
 import { BACKOFF_MAX_MS, Watcher } from '../src/hdtp/watch.ts'
-import { FakeNode, memoryLog } from './fakes.ts'
+import { FakeNode, memoryLog, ok, type ToolAnswer } from './fakes.ts'
 
 function setup(draft: Draft = async () => 'an answer') {
   const node = new FakeNode()
@@ -108,6 +108,52 @@ describe('the wait_for_updates loop', () => {
     watcher.stop()
     // The first wait after the failures carries the cursor it had, not a fresh start.
     expect(sinces(node)).toEqual([undefined, 0, 0])
+  })
+
+  it.each<[string, ToolAnswer]>([
+    ['no content', { content: [] }],
+    ['JSON that is not an object', ok(42)],
+    ['an answer with no cursor', ok({ threads: null, pending_requests: 0, timed_out: false })],
+  ])('backs off on an answer it cannot read (%s), neither ending nor spinning', async (_, unreadable) => {
+    const { node, log, watcher } = setup()
+    watcher.sync(['acct-1'])
+    await vi.advanceTimersByTimeAsync(1_000)
+    node.waitAnswer = unreadable
+    // The held wait ends on the clock, then every answer is unreadable for two minutes.
+    await vi.advanceTimersByTimeAsync(node.holdMs + 120_000)
+    const failed = log.lines.filter((l) => l.code === 'watch_failed')
+    expect(failed.length).toBeGreaterThanOrEqual(7)
+    expect(failed.length).toBeLessThanOrEqual(9)
+    expect(failed[0]!.fields).toEqual({ account_id: 'acct-1', reason: 'wait_for_updates:unreadable_answer', attempt: 1 })
+    node.waitAnswer = undefined
+    await vi.advanceTimersByTimeAsync(BACKOFF_MAX_MS)
+    watcher.stop()
+    // Every wait after the first carried the cursor the first answer gave, before and after.
+    expect(sinces(node)[0]).toBeUndefined()
+    expect(new Set(sinces(node).slice(1))).toEqual(new Set([0]))
+    expect(sinces(node).length).toBeLessThanOrEqual(12)
+  })
+
+  it('logs a pass that rejects by its code, and starts the next one on news', async () => {
+    const node = new FakeNode()
+    const log = memoryLog()
+    let passes = 0
+    const watcher = new Watcher(
+      nodeClientOver(node.call),
+      async () => {
+        if (++passes === 1) throw new NodeRefusal('get_inbox', 'internal')
+      },
+      log,
+    )
+    watcher.sync(['acct-1'])
+    await vi.advanceTimersByTimeAsync(1_000)
+    node.request('req1')
+    await vi.advanceTimersByTimeAsync(100)
+    watcher.stop()
+    expect(passes).toBe(2)
+    expect(log.lines.filter((l) => l.code === 'watch_pass_failed')).toEqual([
+      { code: 'watch_pass_failed', fields: { account_id: 'acct-1', reason: 'get_inbox:internal' } },
+    ])
   })
 
   it('stops its loops, and starts none after stop', async () => {

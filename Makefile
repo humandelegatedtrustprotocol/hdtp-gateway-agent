@@ -6,7 +6,8 @@ export MASTRA_AUTO_DETECT_URL := true
 
 .PHONY: check typecheck test build dev
 
-# build before test: test/cli.test.ts runs `mastra dev`, which needs the build's output.
+# build before test: test/cli.test.ts runs `mastra dev`, which opens .mastra/.build/entry-0.mjs, a
+# file `mastra build` writes. Without it `mastra dev` logs ENOENT and serves nothing.
 check: typecheck build test
 
 typecheck: node_modules
