@@ -23,8 +23,9 @@
 // parses.
 
 import type { Agent } from '@mastra/core/agent'
+import { getCurrentSpan } from '@mastra/core/observability/context-storage'
 import type { Config } from './config.ts'
-import { consoleLog, type Fields, type Log } from './log.ts'
+import { consoleLog, untraced, type Fields, type Log, type Trace } from './log.ts'
 import { FirstStartUnreadable, firstStart } from './first-start.ts'
 import { NodeRefusal, TOOLS_CALLED, connectNode, refusalCode, type NodeClient } from './node.ts'
 import { Responder, type Draft } from './responder.ts'
@@ -36,10 +37,16 @@ let receiver: ((req: Request) => Promise<Response>) | null = null
 /** The most one draft may write, reasoning included. */
 export const MAX_OUTPUT_TOKENS = 4096
 
-/** One draft: a model call under the cap, refused as draft:truncated when it stops there. */
+/**
+ * One draft: a model call under the cap, refused as draft:truncated when it stops there. The agent
+ * run is kept under the span the draft is made in, as one trace with it.
+ */
 export function drafter(agent: Pick<Agent, 'generate'>): Draft {
   return async (prompt) => {
-    const out = await agent.generate(prompt, { modelSettings: { maxOutputTokens: MAX_OUTPUT_TOKENS } })
+    const out = await agent.generate(prompt, {
+      modelSettings: { maxOutputTokens: MAX_OUTPUT_TOKENS },
+      tracingContext: { currentSpan: getCurrentSpan() },
+    })
     if (out.finishReason === 'length') throw new NodeRefusal('draft', 'truncated')
     return out.text
   }
@@ -57,8 +64,11 @@ export function receive(req: Request): Promise<Response> {
   return receiver ? receiver(req) : Promise.resolve(Response.json({ code: 'not_started' }, { status: 503 }))
 }
 
-/** Starts the runtime once; the function returned stops its loops and its timers. */
-export function startRuntime(config: Config, agent: Agent, log: Log = consoleLog): () => void {
+/**
+ * Starts the runtime once; the function returned stops its loops and its timers. Each webhook hit,
+ * reconcile pass and wait loop's pass runs in a span of `trace`'s.
+ */
+export function startRuntime(config: Config, agent: Agent, log: Log = consoleLog, trace: Trace = untraced): () => void {
   if (receiver) return () => {}
   let responder: Responder | null = null
   let stop = () => {}
@@ -89,7 +99,7 @@ export function startRuntime(config: Config, agent: Agent, log: Log = consoleLog
       firstStart: since,
       now,
     })
-    const watcher = new Watcher(node, (accountId) => r.reconcileAccount(accountId), log)
+    const watcher = new Watcher(node, (accountId) => trace('watch_pass', () => r.reconcileAccount(accountId)), log)
     let sweeping = false
     let failures = 0
     let retry: ReturnType<typeof setTimeout> | undefined
@@ -98,23 +108,27 @@ export function startRuntime(config: Config, agent: Agent, log: Log = consoleLog
       if (sweeping) return
       sweeping = true
       try {
-        if (!responder) {
-          const missing = await missingTools(node)
-          if (missing.tools.length > 0) {
-            idleWhy = 'tools_missing'
-            const fields: Fields = { tools: missing.tools.join(',') }
-            if (missing.skipped.length > 0) fields.skipped = missing.skipped.join(',')
-            log.warn('tools_missing', fields)
-            stop()
-            return
+        await trace('reconcile', async () => {
+          try {
+            if (!responder) {
+              const missing = await missingTools(node)
+              if (missing.tools.length > 0) {
+                idleWhy = 'tools_missing'
+                const fields: Fields = { tools: missing.tools.join(',') }
+                if (missing.skipped.length > 0) fields.skipped = missing.skipped.join(',')
+                log.warn('tools_missing', fields)
+                stop()
+                return
+              }
+              responder = r
+            }
+            await r.reconcile((accounts) => watcher.sync(accounts))
+            failures = 0
+          } catch (e) {
+            log.warn('reconcile_failed', { reason: refusalCode(e) })
+            if (!watcher.watching) retry = setTimeout(() => void sweep(), backoff(++failures)).unref()
           }
-          responder = r
-        }
-        await r.reconcile((accounts) => watcher.sync(accounts))
-        failures = 0
-      } catch (e) {
-        log.warn('reconcile_failed', { reason: refusalCode(e) })
-        if (!watcher.watching) retry = setTimeout(() => void sweep(), backoff(++failures)).unref()
+        })
       } finally {
         sweeping = false
       }
@@ -131,6 +145,7 @@ export function startRuntime(config: Config, agent: Agent, log: Log = consoleLog
   receiver = createReceiver({
     secret: () => config.webhookSecret,
     log,
+    trace,
     handlers: {
       message: (thread) => (responder ? responder.onMessage(thread) : idle()),
       reconcile: () => (responder ? responder.reconcile() : idle()),

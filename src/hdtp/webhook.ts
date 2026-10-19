@@ -7,7 +7,7 @@
 // with a 10 s timeout, and a model call can take longer than that.
 
 import { Bounded } from './bounded.ts'
-import type { Log } from './log.ts'
+import { untraced, type Log, type Trace } from './log.ts'
 import { refusalCode } from './node.ts'
 import { SIGNATURE_HEADER, verifySignature } from './signature.ts'
 
@@ -36,6 +36,8 @@ export interface ReceiverOptions {
   secret: () => string | undefined
   handlers: Handlers
   log: Log
+  /** The span each hit runs in, from the request to the end of the task it scheduled. */
+  trace?: Trace
   /** Unix seconds. */
   now?: () => number
   /** Runs a task after the answer is sent. */
@@ -93,30 +95,26 @@ const idIn = (data: Record<string, unknown>, name: string) => {
 /** The handler for POST /hdtp/webhook. */
 export function createReceiver(opts: ReceiverOptions): (req: Request) => Promise<Response> {
   const now = opts.now ?? (() => Math.floor(Date.now() / 1000))
-  const schedule =
-    opts.schedule ??
-    ((task) => {
-      setImmediate(() => {
-        task().catch((e: unknown) => opts.log.warn('webhook_task_failed', { reason: refusalCode(e) }))
-      })
-    })
+  const trace = opts.trace ?? untraced
+  const schedule = opts.schedule ?? ((task) => void setImmediate(() => void task()))
   const seen = new Bounded<true>(SEEN_EVENTS)
 
-  return async (req) => {
+  /** The answer, and the task to run after it is sent. */
+  const handle = async (req: Request): Promise<[Response, (() => Promise<void>) | null]> => {
     const secret = opts.secret()
     if (!secret) {
       opts.log.warn('webhook_secret_unset')
-      return answer(503, { code: 'webhook_secret_unset' })
+      return [answer(503, { code: 'webhook_secret_unset' }), null]
     }
     const body = await readBounded(req, MAX_BODY_BYTES)
-    if (body === null) return answer(413, { code: 'too_large' })
+    if (body === null) return [answer(413, { code: 'too_large' }), null]
     if (!verifySignature(secret, body, req.headers.get(SIGNATURE_HEADER), now())) {
       opts.log.warn('webhook_bad_signature')
-      return answer(401, { code: 'bad_signature' })
+      return [answer(401, { code: 'bad_signature' }), null]
     }
     const env = parseEnvelope(body)
-    if (!env) return answer(400, { code: 'bad_envelope' })
-    if (seen.has(env.id)) return answer(200, { status: 'duplicate' })
+    if (!env) return [answer(400, { code: 'bad_envelope' }), null]
+    if (seen.has(env.id)) return [answer(200, { status: 'duplicate' }), null]
     seen.set(env.id, true)
 
     const h = opts.handlers
@@ -131,10 +129,26 @@ export function createReceiver(opts: ReceiverOptions): (req: Request) => Promise
     }
     if (!task) {
       opts.log.info('webhook_ignored', { event_id: env.id, type: env.type })
-      return answer(200, { status: 'ignored' })
+      return [answer(200, { status: 'ignored' }), null]
     }
     opts.log.info('webhook_accepted', { event_id: env.id, type: env.type })
-    schedule(task)
-    return answer(202, { status: 'accepted' })
+    return [answer(202, { status: 'accepted' }), task]
   }
+
+  return (req) =>
+    new Promise<Response>((answered, failed) => {
+      trace('webhook', async () => {
+        const [response, task] = await handle(req)
+        answered(response)
+        if (!task) return
+        // The span stays open until the task, and its failure's line, are done.
+        await new Promise<void>((done) =>
+          schedule(() =>
+            task()
+              .catch((e: unknown) => opts.log.warn('webhook_task_failed', { reason: refusalCode(e) }))
+              .finally(done),
+          ),
+        )
+      }).catch(failed)
+    })
 }

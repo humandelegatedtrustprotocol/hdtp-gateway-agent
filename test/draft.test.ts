@@ -24,7 +24,8 @@ describe('a draft', () => {
     const { agent, options } = agentAnswering(reply('Tuesday works.'), 'stop')
     expect(await drafter(agent)('prompt')).toBe(reply('Tuesday works.'))
     expect(MAX_OUTPUT_TOKENS).toBe(4096)
-    expect(options).toEqual([{ modelSettings: { maxOutputTokens: 4096 } }])
+    // No span is open here; under one, the agent run is kept in its trace (test/observability.test.ts).
+    expect(options).toEqual([{ modelSettings: { maxOutputTokens: 4096 }, tracingContext: { currentSpan: undefined } }])
   })
 
   it('refuses a call that stopped at the cap as draft:truncated, even when its text is a turn', async () => {
