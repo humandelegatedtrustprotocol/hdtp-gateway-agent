@@ -140,6 +140,12 @@ export class FakeNode {
     }
   }
 
+  /** A new message's id and time, as the node gives them: the msg_id, and the clock's next second. */
+  private stamp(): { message_id: string; created_at: number } {
+    const at = ++this.clock
+    return { message_id: `msg-${at}`, created_at: at }
+  }
+
   trustOf(fpr: string): string {
     return this.trust.get(fpr) ?? 'messages_only'
   }
@@ -152,7 +158,7 @@ export class FakeNode {
   inbound(threadId: string, body: string, sender = 'human'): void {
     const th = this.threads.get(threadId)
     if (!th) throw new Error('no thread')
-    th.messages.push({ direction: 'in', sender, kind: 'text', body, trust: 'messages_only', created_at: ++this.clock })
+    th.messages.push({ direction: 'in', sender, kind: 'text', body, trust: 'messages_only', ...this.stamp() })
     this.change(th.account, { thread_id: threadId })
   }
 
@@ -160,7 +166,7 @@ export class FakeNode {
   outbound(threadId: string, body: string, sender = 'human'): void {
     const th = this.threads.get(threadId)
     if (!th) throw new Error('no thread')
-    th.messages.push({ direction: 'out', sender, kind: 'text', body, trust: 'messages_only', created_at: ++this.clock })
+    th.messages.push({ direction: 'out', sender, kind: 'text', body, trust: 'messages_only', ...this.stamp() })
     th.readThrough = th.messages.length
     this.change(th.account, { thread_id: threadId })
   }
@@ -210,7 +216,7 @@ export class FakeNode {
         const dup = this.sent.some((s) => s.account_id === acct && s.contact_fpr === args.contact_fpr && s.msg_id === args.msg_id)
         if (!dup) {
           this.sent.push(args as (typeof this.sent)[number])
-          th.messages.push({ direction: 'out', sender: 'agent', kind: 'text', body: args.text as string, trust: 'messages_only', created_at: ++this.clock })
+          th.messages.push({ direction: 'out', sender: 'agent', kind: 'text', body: args.text as string, trust: 'messages_only', ...this.stamp() })
           th.readThrough = th.messages.length
           this.change(acct, { thread_id: args.thread_id as string })
         }

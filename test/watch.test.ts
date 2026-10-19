@@ -79,7 +79,7 @@ describe('the wait_for_updates loop', () => {
     watcher.sync(['acct-1'])
     await vi.advanceTimersByTimeAsync(5_000)
     // A message the change log no longer holds, then a wait whose cursor the log cannot answer from.
-    node.threads.get('th1')!.messages.push({ direction: 'in', sender: 'human', kind: 'text', body: 'hello', trust: 'messages_only', created_at: 1 })
+    node.threads.get('th1')!.messages.push({ direction: 'in', sender: 'human', kind: 'text', body: 'hello', trust: 'messages_only', message_id: 'msg-1', created_at: 1 })
     node.expireNext = true
     await vi.advanceTimersByTimeAsync(node.holdMs + 1_000)
     watcher.stop()

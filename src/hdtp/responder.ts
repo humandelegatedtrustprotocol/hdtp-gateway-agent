@@ -3,10 +3,12 @@
 // A webhook names a thread or a request; reconciling walks list_pending and get_inbox, over every
 // account for a sweep and over one when the wait_for_updates loop (watch.ts) says something moved
 // in it. Threads end in answerThread, which replies only when the thread's newest message is the
-// contact's, under a msg_id derived from that message. The node records one row per (account, contact, direction,
-// msg_id); a replay writes nothing and answers the original row's result
-// (messaging.Service.Record), so a webhook and a reconcile pass, or two processes, that both reach
-// one message record one reply.
+// contact's, under a msg_id derived from that message's id (read_thread's message_id, the node's
+// msg_id for it, unique per account, contact and direction). The node records one row per
+// (account, contact, direction, msg_id); a replay writes nothing and answers the original row's
+// result (messaging.Service.Record), so a webhook and a reconcile pass, or two processes, that both
+// reach one message record one reply, whatever else changed in the thread in between. A message
+// without an id is not answered: the node this agent needs names every one.
 //
 // A thread whose contact's side is an agent too would otherwise be answered for as long as both
 // agents run. agentTurns counts the turns since the last message labelled as a person's, and at
@@ -52,10 +54,10 @@ export const MAX_ATTEMPTS = 3
 /** How many replied keys are remembered before the oldest is forgotten (the node still dedups). */
 export const REMEMBERED = 10_000
 
-/** The msg_id of the reply to a thread's newest message: the same from every path that reaches it. */
-export function replyKey(accountId: string, threadId: string, index: number, m: ThreadMessage): string {
+/** The msg_id of the reply to a contact's message, by the message's id: the same from every path that reaches it. */
+export function replyKey(accountId: string, contactFpr: string, messageId: string): string {
   const h = createHash('sha256')
-  for (const part of [accountId, threadId, String(index), String(m.created_at), m.sender, m.kind, m.body]) {
+  for (const part of [accountId, contactFpr, messageId]) {
     h.update(part).update('\0')
   }
   return `agent-reply-${h.digest('hex').slice(0, 32)}`
@@ -229,13 +231,17 @@ export class Responder {
         return
       }
       const messages = await this.node.readThread(accountId, row.thread_id)
-      const index = messages.length - 1
-      const newest = messages[index]
+      const newest = messages.at(-1)
       if (!newest || newest.direction !== 'in') {
         this.revisit.delete(where)
         return
       }
-      const key = replyKey(accountId, row.thread_id, index, newest)
+      if (typeof newest.message_id !== 'string' || newest.message_id === '') {
+        this.revisit.delete(where)
+        this.log.warn('message_id_missing', { thread_id: row.thread_id })
+        return
+      }
+      const key = replyKey(accountId, row.contact_fpr, newest.message_id)
       if (this.done.has(key)) {
         this.revisit.delete(where)
         return

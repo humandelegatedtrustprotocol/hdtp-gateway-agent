@@ -73,6 +73,36 @@ describe('one reply per newest inbound message', () => {
     expect(node.calls.filter((c) => c === 'send_to_contact')).toHaveLength(2)
   })
 
+  it('keys the reply on the message id, so a thread pruned of earlier messages gives the same key', async () => {
+    const { node, responder } = setup()
+    node.thread('th1')
+    node.inbound('th1', 'first')
+    node.outbound('th1', 'the owner answered from the portal')
+    node.inbound('th1', 'hello')
+    await responder.onMessage('th1')
+    expect(node.sent).toHaveLength(1)
+    // Retention prunes the oldest message, and the reply is not yet in the thread a fresh process reads.
+    const th = node.threads.get('th1')!
+    th.messages.shift()
+    th.messages.pop()
+    const again = new Responder(nodeClientOver(node.call), async () => 'second draft', memoryLog(), rules())
+    await again.onMessage('th1')
+    expect(node.calls.filter((c) => c === 'send_to_contact')).toHaveLength(2)
+    expect(node.sent).toHaveLength(1)
+  })
+
+  it('does not answer a message the node gives no id', async () => {
+    const { node, prompts, responder, log } = setup()
+    node.thread('th1')
+    node.inbound('th1', 'hello')
+    delete (node.threads.get('th1')!.messages[0] as { message_id?: string }).message_id
+    await responder.onMessage('th1')
+    await responder.reconcile()
+    expect(prompts).toEqual([])
+    expect(node.sent).toEqual([])
+    expect(log.lines.filter((l) => l.code === 'message_id_missing')).toEqual([{ code: 'message_id_missing', fields: { thread_id: 'th1' } }])
+  })
+
   it('replies again to a new message, under a new msg_id', async () => {
     const { node, responder } = setup()
     node.thread('th1')

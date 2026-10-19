@@ -18,10 +18,17 @@ an agent-answered capability finds no agent outside that minute, and the node fa
 The node holds each wait for at most 25 s, so the loop keeps the agent attached between sweeps.
 `docs/a2-observed.md` records runs against two real nodes.
 
+It needs a node whose owner MCP `read_thread` gives each message its `message_id`
+([hdtp-gateway#208](https://github.com/humandelegatedtrustprotocol/hdtp-gateway/issues/208)):
+hdtp-gateway v0.3.0 or later. v0.2.0 and earlier give none, and the agent answers no thread of
+theirs (`message_id_missing` in its log). Each reply is sent under a `msg_id` derived from
+the id of the message it answers, so every path that reaches one message, in any process, sends one
+reply, which the node records once.
+
 ## What it answers, and what it leaves to the owner
 
-Each rule is decided before the agent reads a thread, so whatever it leaves is still unread in the
-owner's portal.
+The first three rules are decided before the agent reads a thread, so whatever they leave is still
+unread in the owner's portal.
 
 - **Only contacts the owner trusts, by default.** A contact is trusted when the owner has set
   its trust to "May instruct your agent" (`may_instruct`) on the contact's page in the portal.

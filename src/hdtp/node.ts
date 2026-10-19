@@ -19,6 +19,8 @@ export interface InboxThread {
 
 /** One message of read_thread, oldest first. */
 export interface ThreadMessage {
+  /** The message's msg_id on the node, unique per account, contact and direction. */
+  message_id: string
   direction: string // "in" from the contact, "out" from this side
   sender: string
   kind: string
