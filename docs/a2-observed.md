@@ -141,8 +141,10 @@ Run on the same two nodes, at hdtp-gateway 2170fda, with copies of their data. T
 owner MCPs were on ports of their own. Ana's webhook was moved to a port of its own, through her
 portal's Webhooks page. Both runs set `HDTP_RECONCILE_SECONDS=300`, so the gap was longer than the
 node's minute. At the default of 60 s, the gap is read from the code, not observed. The node keeps
-the last request in whole seconds. So between the window closing and the next sweep's first
-request, there is less than about a second per sweep.
+the last request in whole seconds, and writes it at most once every 5 s (`presence.SeenEvery`).
+When the sweep is the agent's only caller, the window closes less than about a second before the
+next sweep's first request. When another request (a webhook's, say) came in the 5 s before a
+sweep, that sweep's requests are not written, and the gap can reach about 6 s.
 
 - **Before** (the agent at 7759d02).
   - The sweep ran at 109.

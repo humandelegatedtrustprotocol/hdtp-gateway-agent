@@ -6,12 +6,16 @@
 // (`no_agent`). The node holds each wait_for_updates call for at most 25 s (ownermcp WaitMaxSec),
 // so a loop of them keeps the agent attached however long the sweep's interval is.
 //
-// An answer that is news (not timed_out) naming a thread or a waiting request, or one that says
-// the cursor expired, starts one pass over the account (Responder.reconcileAccount): the answer
-// carries neither a thread's contact status nor a request's id, and the pass reads both. The pass
-// runs beside the loop, never in it: a draft makes no request to the node while the model writes,
-// and a loop that waited on it would let the agent drop out of presence for as long as the model
-// took. A pass asked for while one runs makes it run once more.
+// The first answer, an answer that is news (not timed_out) naming a thread or a waiting request,
+// and one that says the cursor expired each start one pass over the account
+// (Responder.reconcileAccount): the answer carries neither a thread's contact status nor a
+// request's id, and the pass reads both. The pass runs beside the loop, never in it: a draft makes
+// no request to the node while the model writes, and a loop that waited on it would let the agent
+// drop out of presence for as long as the model took. A pass asked for while one runs makes it run
+// once more.
+//
+// The runtime's stop function stops the loops; the tests use it. A process that ends (Mastra's
+// server exits on SIGTERM) ends its held wait with it.
 //
 // A failed wait is retried after a delay that doubles from BACKOFF_MIN_MS to BACKOFF_MAX_MS, with
 // the cursor kept. The sweep (HDTP_RECONCILE_SECONDS) stays the safety net under the loop and the
@@ -24,7 +28,7 @@ export const BACKOFF_MIN_MS = 1_000
 /** Under the node's one-minute presence window, so a node that comes back sees the agent soon. */
 export const BACKOFF_MAX_MS = 30_000
 
-/** What the loop wakes: a pass over one account. */
+/** What the loop wakes: a pass over one account. It logs its own failures and never rejects. */
 export type Pass = (accountId: string) => Promise<void>
 
 export function backoff(failures: number): number {
@@ -133,11 +137,7 @@ export class Watcher {
       try {
         do {
           state.again = false
-          try {
-            await this.pass(accountId)
-          } catch (e) {
-            this.log.warn('watch_pass_failed', { account_id: accountId, reason: refusalCode(e) })
-          }
+          await this.pass(accountId)
         } while (state.again && !this.stopped)
       } finally {
         this.passes.delete(accountId)
