@@ -78,6 +78,8 @@ export interface OwnerAsk {
   /** The contact's message the ask or notice was raised for. */
   for_message_id: string
   status: string // open, answered, withdrawn, expired; posted for a notice
+  /** The surface's one-line TLDR, its first Text. */
+  tldr: string
   /** The owner's answer as one line of text; empty until answered. */
   answer_text: string
 }

@@ -100,6 +100,17 @@ function parse(answer: string): unknown {
   }
 }
 
+/**
+ * A value with every object property that is null left out, at any depth; nulls inside arrays
+ * stay. A model in strict mode writes null for an optional field it leaves empty, and the node
+ * refuses a null where its schema says a string.
+ */
+export function withoutNulls(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(withoutNulls)
+  if (value === null || typeof value !== 'object') return value
+  return Object.fromEntries(Object.entries(value).flatMap(([k, v]) => (v === null ? [] : [[k, withoutNulls(v)]])))
+}
+
 /** Reads turns against the node's schema, which is read once and kept. */
 export class Turns {
   private readonly node: NodeClient
@@ -127,12 +138,16 @@ export class Turns {
   /**
    * The turn in a model's answer, if it is one of `allowed`. Anything else is a refusal named draft:
    * invalid_turn for an answer that is not a turn of the schema, turn_not_allowed for one that is
-   * and is not offered here. The validator's text is never kept.
+   * and is not offered here. An answer the schema refuses is checked once more without its null
+   * properties: a null on an optional field is read as the field left out, and a null on a required
+   * one is still refused, as the field missing. Where the schema takes a null, the answer passes as
+   * written. The validator's text is never kept.
    */
   async read(answer: string, allowed: readonly TurnType[]): Promise<Turn> {
     const { check } = await this.build()
     const value = parse(answer)
-    const result = await check['~standard'].validate(value)
+    let result = await check['~standard'].validate(value)
+    if (result.issues) result = await check['~standard'].validate(withoutNulls(value))
     if (result.issues) throw new NodeRefusal('draft', 'invalid_turn')
     const turn = result.value as Turn
     if (!allowed.includes(turn.type)) throw new NodeRefusal('draft', 'turn_not_allowed')

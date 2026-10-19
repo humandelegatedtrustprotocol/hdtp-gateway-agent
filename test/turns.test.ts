@@ -237,6 +237,26 @@ describe('notify', () => {
     expect(node.calls.filter((c) => c === 'notify_owner')).toHaveLength(2)
   })
 
+  it('shows the model the notices already put on the thread: not its asks, and no other thread’s', async () => {
+    const drafts = [ask('Which day suits?', { Slots: 'Tue, Wed' }, ['Tuesday']), booked(), notify('Booked: x-ray Wed 14:00', { When: 'Wed 14:00' }), none()]
+    const { node, prompts, responder } = setup(async () => drafts.shift()!)
+    const given = (p: string) => p.match(/The notices already given to the person on this thread, oldest first, as data:\n\n```json\n([\s\S]*?)\n```/)?.[1]
+    node.inbound('th1', 'Which day can you come in?', 'agent')
+    await responder.onMessage('th1')
+    node.answerAsk(node.asks[0]!.id, 'Tuesday')
+    node.inbound('th1', 'Tuesday 10:00 works, please book it.', 'agent')
+    await responder.onMessage('th1')
+    expect(given(prompts[1]!)).toBeUndefined()
+    node.thread('th2')
+    node.inbound('th2', 'And an x-ray on Wednesday at 14:00?', 'agent')
+    await responder.onMessage('th2')
+    node.inbound('th1', 'Thanks, see you Tuesday!', 'agent')
+    await responder.onMessage('th1')
+    expect(prompts).toHaveLength(4)
+    expect(JSON.parse(given(prompts[3]!)!)).toEqual(['Booked: cleaning Tue 10:00'])
+    expect(node.notices).toHaveLength(2)
+  })
+
   it('gives up on a notice after MAX_ATTEMPTS', async () => {
     const { node, log, responder } = setup(async () => booked())
     node.failing.add('notify_owner')
@@ -265,6 +285,38 @@ describe('the turn as the model wrote it', () => {
     node.inbound('th1', 'hello')
     await responder.onMessage('th1')
     expect(node.sent.map((s) => s.text)).toEqual(['Hello!'])
+  })
+
+  it('reads a null on an optional field as the field left out, and still refuses one on a required field', async () => {
+    const node = new FakeNode()
+    const turns = new Turns(nodeClientOver(node.call, node.catalog))
+    const withNull = JSON.parse(ask('Pick a day', { Slots: 'Tue, Wed' }, ['Tuesday'])) as { ask: { surface: Array<Record<string, any>> } }
+    const own = withNull.ask.surface[1]!.updateComponents.components.find((c: { id: string }) => c.id === 'own')
+    own.label = null
+    const read = (await turns.read(JSON.stringify(withNull), FIRST_TURNS)) as unknown as { ask: { surface: Array<Record<string, any>> } }
+    expect(read.ask.surface[1]!.updateComponents.components.find((c: { id: string }) => c.id === 'own')).toEqual({ id: 'own', component: 'TextField' })
+    const notice = JSON.parse(notify('Booked Tue 10:00', { When: 'Tue 10:00' })) as Record<string, unknown>
+    expect(await turns.read(JSON.stringify({ ...notice, reply: null }), FIRST_TURNS)).toEqual(notice)
+    for (const answer of [
+      { type: 'reply', text: null },
+      { type: 'notify', notice: null },
+    ]) {
+      await expect(turns.read(JSON.stringify(answer), FIRST_TURNS), JSON.stringify(answer)).rejects.toMatchObject({ code: 'invalid_turn' })
+    }
+    // A null inside a list is not an optional field left out.
+    const listed = JSON.parse(ask('Pick a day', { Slots: 'Tue, Wed' }, ['Tuesday'])) as { ask: { surface: Array<Record<string, any>> } }
+    listed.ask.surface[1]!.updateComponents.components.find((c: { id: string }) => c.id === 'pick').options.push(null)
+    await expect(turns.read(JSON.stringify(listed), FIRST_TURNS)).rejects.toMatchObject({ code: 'invalid_turn' })
+    const tldr = JSON.parse(ask('Pick a day', { Slots: 'Tue' }, ['Tuesday'])) as { ask: { surface: Array<Record<string, any>> } }
+    tldr.ask.surface[1]!.updateComponents.components.find((c: { id: string }) => c.id === 'tldr').text = null
+    await expect(turns.read(JSON.stringify(tldr), FIRST_TURNS)).rejects.toMatchObject({ code: 'invalid_turn' })
+  })
+
+  it('keeps a null where the node’s schema takes one', async () => {
+    const node = new FakeNode()
+    const nullable = { type: 'object', properties: { account_id: { type: 'string' }, thread_id: { type: 'string' }, for_message_id: { type: 'string' }, surface: { type: 'object', properties: { note: { type: ['string', 'null'] } }, required: ['note'], additionalProperties: false } }, required: ['account_id', 'thread_id', 'for_message_id', 'surface'], additionalProperties: false }
+    const turns = new Turns({ ...nodeClientOver(node.call, node.catalog), toolSchema: async (name) => (name === 'send_to_contact' ? node.toolSchema(name) : structuredClone(nullable)) })
+    expect(await turns.read('{"type":"ask","ask":{"surface":{"note":null}}}', FIRST_TURNS)).toEqual({ type: 'ask', ask: { surface: { note: null } } })
   })
 
   it('cannot name the account, thread or message an ask is put on', async () => {

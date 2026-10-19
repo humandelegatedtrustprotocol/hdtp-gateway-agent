@@ -97,6 +97,13 @@ const refusal = (code: string, extra: Record<string, unknown> = {}): ToolAnswer 
   content: [{ type: 'text', text: JSON.stringify({ code, detail: 'refused', ...extra }) }],
 })
 
+/** A surface's TLDR as the node reads it: the text of the root's first child. */
+function tldrOf(surface: unknown): string {
+  const components = ((surface as Array<Record<string, any>>)[1]?.updateComponents?.components ?? []) as Array<Record<string, any>>
+  const first = components.find((c) => c.id === 'root')?.children?.[0]
+  return String(components.find((c) => c.id === first)?.text ?? '')
+}
+
 /** The owner MCP's tools as the node answers them, over an in-memory store. */
 export class FakeNode {
   accounts = ['acct-1']
@@ -340,6 +347,7 @@ export class FakeNode {
           for_message_id: args.for_message_id as string,
           status: 'open',
           answer_text: '',
+          tldr: tldrOf(args.surface),
           surface: args.surface,
         })
         this.change(acct, { thread_id: args.thread_id as string })
@@ -370,6 +378,7 @@ export class FakeNode {
             for_message_id: n.for_message_id,
             status: 'posted',
             answer_text: '',
+            tldr: tldrOf(n.surface),
           })),
         ].filter((r) => r.account === acct)
         const listed =

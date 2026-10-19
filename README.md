@@ -41,7 +41,8 @@ restart the agent.
 For the contact's newest message the model returns one JSON object, one of four turns. Code checks
 it against a schema built from the node's own tool schemas (read from its `tools/list`), and refuses
 anything else by code (`draft:invalid_turn`); a refused turn is drafted again on a later pass, up to
-3 attempts, as a failed draft always was.
+3 attempts, as a failed draft always was. A null the schema does not take is read as the field left
+out, so a null on an optional field passes and one on a required field is still refused.
 
 - **reply**: a message to the contact, sent with `send_to_contact`.
 - **ask**: a card for the owner, put with `ask_owner` for the message it is about, from the node's
@@ -52,9 +53,13 @@ anything else by code (`draft:invalid_turn`); a refused turn is drafted again on
   owner's message; the agent then carries on from the thread. An ask that ends with its message still
   the newest (answered with no message, or expired) is drafted for once more, with what became of it,
   and only a reply, a notice or none is offered then.
-- **notify**: a card for the owner with no buttons, put with `notify_owner`: a TLDR of what the
-  agent agreed. A reply to the contact may go with it, sent first. A notice the node did not take is
-  put again on later passes, with no new draft.
+- **notify**: a card for the owner with no buttons, put with `notify_owner`: a TLDR of what was
+  agreed. The model is told that something is agreed only once both sides have said yes to the same
+  terms, so a reply that still asks the contact to book or confirm goes without a notice, and the
+  notice follows their confirmation. It is shown the TLDRs of the notices already put on the thread,
+  and told not to notify one agreement twice. In code, a notice is put for the message it answers
+  and the node keeps one per message. A reply to the contact may go with it, sent first. A notice
+  the node did not take is put again on later passes, with no new draft.
 - **none**: nothing is sent, for an acknowledgement or a sign-off, so two agents end a conversation
   when it ends rather than at the turn cap. It counts as answered: the message is not drafted for
   again.
@@ -67,7 +72,8 @@ The persona says, per topic, which of two stances the agent takes:
 
 - **ask before committing**: it proposes and negotiates within the limits, then asks before
   anything is agreed;
-- **commit within limits and notify**: it agrees within the limits, then notifies the owner.
+- **commit within limits and notify**: it agrees within the limits, then notifies the owner once
+  the other side has confirmed.
 
 `persona.md` has an example `## Autonomy` section, and `examples/personas/` has both sides of seven
 use cases (a meeting, an event venue, GPU procurement, a rent renewal, a dentist's appointment, a

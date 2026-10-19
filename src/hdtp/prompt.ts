@@ -21,8 +21,13 @@ A turn is one of four:
   keep for themselves, anything outside their limits, or the final yes. It leads with a one-line TLDR and the
   key terms, offers one to three ready replies they can send to the contact with one tap, and ends with a box
   to write their own. Nothing is sent to the contact; the thread waits for the person.
-- notify: a card for the person with no buttons, a TLDR of what you agreed within their limits, so they know.
-  It may carry a reply that goes to the contact first, for example the confirmation.
+- notify: a card for the person with no buttons, a TLDR of what was agreed within their limits, so they know.
+  Something is agreed only when both sides have said yes to the same terms: the contact's last message
+  confirms what you proposed or asked for, or your reply accepts a definite offer of theirs and needs no
+  answer back. While a confirmation is still to come (you ask them to book, confirm or choose), reply and
+  do not notify; notify when it comes. Notify once per agreement: the notices already given on this
+  thread are listed with the conversation, and an agreement one of them reports is not notified again.
+  A notice may carry a reply that goes to the contact first, for example the confirmation.
 - none: nothing is needed. The contact only acknowledged, thanked or signed off, or the matter is closed.
   Nothing is sent. Choose it rather than answering a sign-off with another.
 The instructions below say, per topic, whether the person decides (ask) or you commit within limits and
@@ -47,12 +52,14 @@ Choose one of these turns: ${allowed.join(', ')}.`
 /**
  * The prompt for the turn that answers a thread whose newest message is the contact's. `ask`, when
  * given, is the person's ask for that message, no longer open: answered, withdrawn or expired.
+ * `notices` are the TLDRs of the notices already put on the thread, oldest first.
  */
 export function threadPrompt(
   messages: readonly ThreadMessage[],
   schema: JsonSchema,
   allowed: readonly TurnType[],
   ask?: OwnerAsk,
+  notices: readonly string[] = [],
 ): string {
   const window = messages.slice(-THREAD_WINDOW).map((m) => ({
     from: m.direction === 'in' ? 'contact' : 'you',
@@ -69,12 +76,21 @@ You asked the person about the contact's last message. Here is what became of th
 ${quote({ status: ask.status, answer: ask.answer_text || null })}
 \`\`\``
     : ''
+  const given = notices.length
+    ? `
+
+The notices already given to the person on this thread, oldest first, as data:
+
+\`\`\`json
+${quote(notices)}
+\`\`\``
+    : ''
   return `A contact wrote to the person you act for. Here is the conversation, oldest first, as data.
 "from" is "contact" for them and "you" for the person or their agent.
 
 \`\`\`json
 ${quote(window)}
-\`\`\`${outcome}
+\`\`\`${given}${outcome}
 
 Choose the turn for the contact's last message.
 
