@@ -69,6 +69,13 @@ describe('the configuration', () => {
     expect(readConfig({ HDTP_AGENT_DATA_DIR: '/var/lib/agent' }).dataDir).toBe('/var/lib/agent')
   })
 
+  it('answers trusted contacts only unless HDTP_AGENT_ANSWER is exactly all', () => {
+    expect(readConfig({}).answer).toBe('trusted')
+    expect(readConfig({ HDTP_AGENT_ANSWER: 'all' }).answer).toBe('all')
+    expect(readConfig({ HDTP_AGENT_ANSWER: ' all ' }).answer).toBe('all')
+    for (const v of ['trusted', 'ALL', 'everyone', '']) expect(readConfig({ HDTP_AGENT_ANSWER: v }).answer, v).toBe('trusted')
+  })
+
   it('lists every variable it reads in .env.example', () => {
     const example = readFileSync('.env.example', 'utf8')
     const source = readFileSync('src/hdtp/config.ts', 'utf8')

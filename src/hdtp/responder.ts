@@ -14,10 +14,13 @@
 // the contact's side claims, so a budget that reads no label (budget.ts) bounds the drafts for each
 // contact as well: it is checked before read_thread, so a thread over it stays unread for the owner.
 //
-// Every contact is treated as messages_only, on purpose: the trust flag the node reports
-// (read_thread's `trust`, list_pending's TrustFlag) is neither read nor shown to the model. This
-// agent has no tools and can only write a message, which messages_only already allows, so a
-// higher flag would let it do nothing more.
+// By default only a trusted contact is answered: one whose trust flag the owner set to may_instruct
+// (list_contacts' trust_flag for a thread, list_pending's TrustFlag for a request). The node's own
+// reading of the flag is the same: may_instruct threads may be acted on, messages_only ones are
+// raised to the person (ownermcp watch.go). Anything but may_instruct is not trusted. A thread is
+// judged before read_thread, so an untrusted contact's message stays unread for the owner.
+// HDTP_AGENT_ANSWER=all answers every active contact instead. The flag decides only whether to
+// answer: this agent has no tools and can only write a message, so it is not shown to the model.
 //
 // The agent answers only what arrived after it first started (first-start.ts): a thread whose
 // newest message (get_inbox's last_at, which the node sets to its newest message's time) is older
@@ -36,6 +39,7 @@ import { NodeRefusal, refusalCode, type InboxThread, type NodeClient, type Pendi
 import { Bounded } from './bounded.ts'
 import { requestPrompt, threadPrompt } from './prompt.ts'
 import { Budget } from './budget.ts'
+import type { Answer } from './config.ts'
 
 /** Writes the reply text for a prompt. The model behind it has no tools. */
 export type Draft = (prompt: string) => Promise<string>
@@ -73,8 +77,13 @@ export function agentTurns(messages: readonly ThreadMessage[]): number {
   return turns
 }
 
+/** The trust flag of a contact this agent answers when it answers trusted contacts only. */
+export const TRUSTED = 'may_instruct'
+
 /** What decides whether to draft. */
 export interface Rules {
+  /** Which contacts are answered (HDTP_AGENT_ANSWER). */
+  answer: Answer
   /** Agent-to-agent turns in a row a thread may have (HDTP_AGENT_TURN_CAP). */
   turnCap: number
   /** Drafts per contact per hour, whatever the labels say (HDTP_AGENT_REPLIES_PER_HOUR). */
@@ -102,6 +111,7 @@ export class Responder {
   private readonly draft: Draft
   private readonly log: Log
   private readonly turnCap: number
+  private readonly answer: Answer
   private readonly firstStart: number
   private readonly budget: Budget
 
@@ -110,6 +120,7 @@ export class Responder {
     this.draft = draft
     this.log = log
     this.turnCap = rules.turnCap
+    this.answer = rules.answer
     this.firstStart = rules.firstStart
     this.budget = new Budget(rules.repliesPerHour, rules.now)
   }
@@ -203,6 +214,14 @@ export class Responder {
     }
     const contact = contactKey(accountId, row.contact_fpr)
     await this.single(where, async () => {
+      if (this.answer === 'trusted') {
+        const c = (await this.node.listContacts(accountId)).find((x) => x.fingerprint === row.contact_fpr)
+        if (c?.trust_flag !== TRUSTED) {
+          this.revisit.delete(where)
+          this.log.info('contact_not_trusted', { thread_id: row.thread_id })
+          return
+        }
+      }
       if (!this.budget.room(contact)) {
         // Kept to revisit, if it was: a thread a failed draft left read is answered once the
         // hour moves on, as an unread one is.
@@ -246,6 +265,10 @@ export class Responder {
     const contact = contactKey(accountId, row.ContactFpr)
     await this.single(key, async () => {
       if (this.done.has(key)) return
+      if (this.answer === 'trusted' && row.TrustFlag !== TRUSTED) {
+        this.log.info('contact_not_trusted', { request_id: row.ID })
+        return
+      }
       if (!this.budget.room(contact)) {
         this.log.info('contact_budget', { request_id: row.ID })
         return

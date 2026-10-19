@@ -23,6 +23,10 @@ The node holds each wait for at most 25 s, so the loop keeps the agent attached 
 Each rule is decided before the agent reads a thread, so whatever it leaves is still unread in the
 owner's portal.
 
+- **Only contacts the owner trusts, by default.** A contact is trusted when the owner has set
+  its trust to "May instruct your agent" (`may_instruct`) on the contact's page in the portal.
+  Every other contact's messages and requests are left to the owner. `HDTP_AGENT_ANSWER=all`
+  answers every active contact instead, as a public demo node would.
 - **Only what arrived after its first start.** The first start writes its time to
   `first-start.json` in the data directory: `HDTP_AGENT_DATA_DIR`, by default `data/` in the
   directory the agent was started from. Every later start reads it back, so a restart does not move

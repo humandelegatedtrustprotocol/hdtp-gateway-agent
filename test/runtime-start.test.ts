@@ -22,6 +22,8 @@ describe('a started runtime', () => {
   })
 
   it('stops at the HDTP_AGENT_TURN_CAP it was configured with', async () => {
+    // Answered by default only because the owner trusts the contact.
+    node.trust.set('fpr-contact', 'may_instruct')
     node.thread('th1')
     node.inbound('th1', 'their agent', 'agent')
     node.outbound('th1', 'our agent', 'agent')

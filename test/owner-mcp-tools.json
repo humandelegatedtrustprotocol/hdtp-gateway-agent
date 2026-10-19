@@ -23,6 +23,22 @@
     }
   },
   {
+    "name": "list_contacts",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "account_id": {
+          "type": "string",
+          "description": "the account to act on"
+        }
+      },
+      "required": [
+        "account_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "read_thread",
     "inputSchema": {
       "type": "object",

@@ -238,6 +238,51 @@ describe('a thread between two agents', () => {
   })
 })
 
+describe('trusted contacts only, by default', () => {
+  it('answers a may_instruct contact, and leaves every other one unread without reading it', async () => {
+    const { node, prompts, responder, log } = setup(undefined, { answer: 'trusted' })
+    node.thread('th-trusted', 'fpr-trusted')
+    node.thread('th-plain', 'fpr-plain')
+    node.thread('th-odd', 'fpr-odd')
+    node.trust.set('fpr-trusted', 'may_instruct')
+    node.trust.set('fpr-odd', 'something_new')
+    for (const th of ['th-trusted', 'th-plain', 'th-odd']) node.inbound(th, 'hello')
+    await responder.reconcile()
+    await responder.onMessage('th-plain')
+    expect(node.sent.map((s) => s.thread_id)).toEqual(['th-trusted'])
+    expect(prompts).toHaveLength(1)
+    expect(log.lines.filter((l) => l.code === 'contact_not_trusted').map((l) => l.fields)).toEqual([
+      { thread_id: 'th-plain' },
+      { thread_id: 'th-odd' },
+      { thread_id: 'th-plain' },
+    ])
+    expect(node.calls.filter((c) => c === 'read_thread')).toHaveLength(1)
+    const inbox = await nodeClientOver(node.call).getInbox('acct-1')
+    expect(inbox.filter((t) => t.unread > 0).map((t) => t.thread_id).sort()).toEqual(['th-odd', 'th-plain'])
+  })
+
+  it('answers a request only from a may_instruct contact', async () => {
+    const { node, responder, log } = setup(undefined, { answer: 'trusted' })
+    node.request('req-plain')
+    node.trust.set('fpr-contact', 'may_instruct')
+    node.request('req-trusted')
+    await responder.reconcile()
+    expect(node.answered.map((a) => a.request_id)).toEqual(['req-trusted'])
+    expect(log.lines.filter((l) => l.code === 'contact_not_trusted').map((l) => l.fields)).toEqual([{ request_id: 'req-plain' }])
+  })
+
+  it('answers every active contact under HDTP_AGENT_ANSWER=all', async () => {
+    const { node, responder } = setup(undefined, { answer: 'all' })
+    node.thread('th-plain', 'fpr-plain')
+    node.inbound('th-plain', 'hello')
+    node.request('req-plain')
+    await responder.reconcile()
+    expect(node.sent.map((s) => s.thread_id)).toEqual(['th-plain'])
+    expect(node.answered.map((a) => a.request_id)).toEqual(['req-plain'])
+    expect(node.calls).not.toContain('list_contacts')
+  })
+})
+
 describe('the start cutoff', () => {
   it('leaves a thread whose newest message is older than the first start unread, and answers one after it', async () => {
     const { node, prompts, responder, log } = setup(undefined, { firstStart: 1_760_000_002 })
@@ -284,7 +329,7 @@ describe('the budget of drafts per contact', () => {
     node.inbound('th1', 'one')
     node.inbound('th2', 'two')
     node.inbound('th-other', 'someone else')
-    node.pending.push({ ID: 'req1', ContactFpr: 'fpr-contact', Capability: 'ask_alex', Args: '{}', Status: 'open', ExpiresAt: 0 })
+    node.pending.push({ ID: 'req1', ContactFpr: 'fpr-contact', Capability: 'ask_alex', Args: '{}', TrustFlag: 'messages_only', Status: 'open', ExpiresAt: 0 })
     await responder.reconcile()
     // The request is answered first, then one of fpr-contact's two threads; the other contact's is answered too.
     expect(node.answered).toHaveLength(1)
@@ -321,7 +366,7 @@ describe('the budget of drafts per contact', () => {
 describe('agent-answered requests', () => {
   it('answers a request.pending once, with the drafted result', async () => {
     const { node, prompts, responder } = setup()
-    node.pending.push({ ID: 'req1', ContactFpr: 'fpr-contact', Capability: 'ask_alex', Args: '{"q":"rate?"}', Status: 'open', ExpiresAt: 0 })
+    node.pending.push({ ID: 'req1', ContactFpr: 'fpr-contact', Capability: 'ask_alex', Args: '{"q":"rate?"}', TrustFlag: 'messages_only', Status: 'open', ExpiresAt: 0 })
     await responder.onRequest('req1')
     await responder.onRequest('req1')
     expect(node.answered).toEqual([{ request_id: 'req1', result: 'reply 1' }])
@@ -331,7 +376,7 @@ describe('agent-answered requests', () => {
 
   it('answers through the reconcile pass a request no webhook announced', async () => {
     const { node, responder } = setup()
-    node.pending.push({ ID: 'req1', ContactFpr: 'fpr-contact', Capability: 'ask_alex', Args: '{}', Status: 'open', ExpiresAt: 0 })
+    node.pending.push({ ID: 'req1', ContactFpr: 'fpr-contact', Capability: 'ask_alex', Args: '{}', TrustFlag: 'messages_only', Status: 'open', ExpiresAt: 0 })
     await responder.reconcile()
     await responder.reconcile()
     expect(node.answered).toEqual([{ request_id: 'req1', result: 'reply 1' }])
@@ -343,7 +388,7 @@ describe('agent-answered requests', () => {
       if (fail) throw new Error('model down')
       return 'the answer'
     })
-    node.pending.push({ ID: 'req1', ContactFpr: 'fpr-contact', Capability: 'ask_alex', Args: '{}', Status: 'open', ExpiresAt: 0 })
+    node.pending.push({ ID: 'req1', ContactFpr: 'fpr-contact', Capability: 'ask_alex', Args: '{}', TrustFlag: 'messages_only', Status: 'open', ExpiresAt: 0 })
     await responder.onRequest('req1')
     expect(node.answered).toEqual([])
     fail = false

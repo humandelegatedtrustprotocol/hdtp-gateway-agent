@@ -41,12 +41,13 @@ describe('the owner MCP over the wire', () => {
     expect(unauthorized()).toBe(0)
   })
 
-  it('carries a signed message.received through to one reply on the node', async () => {
+  it('carries a signed message.received from a trusted contact through to one reply on the node', async () => {
+    node.trust.set('fpr-contact', 'may_instruct')
     node.thread('th2')
     node.inbound('th2', 'are you around?')
     const { node: client, disconnect } = connectNode(url, TOKEN)
     const tasks: Array<Promise<void>> = []
-    const responder = new Responder(client, async () => 'Yes, Alex is around.', memoryLog(), rules())
+    const responder = new Responder(client, async () => 'Yes, Alex is around.', memoryLog(), rules({ answer: 'trusted' }))
     const receive = createReceiver({
       secret: () => 'whsec_x',
       log: memoryLog(),

@@ -55,6 +55,7 @@ export function startRuntime(config: Config, agent: Agent, log: Log = consoleLog
     const { node } = connectNode(config.ownerMcpUrl, token)
     const draft = async (prompt: string) => (await agent.generate(prompt)).text
     const r = new Responder(node, draft, log, {
+      answer: config.answer,
       turnCap: config.agentTurnCap,
       repliesPerHour: config.repliesPerHour,
       firstStart: since,

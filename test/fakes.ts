@@ -18,11 +18,13 @@ export function envelope(id: string, type: string, data: Record<string, unknown>
 }
 
 /**
- * The responder's rules at their defaults, on the host's clock, with any of them replaced. The first
- * start is 0, before every message a FakeNode holds, unless a test sets it.
+ * The responder's rules at their defaults, on the host's clock, with any of them replaced, but for
+ * two a test of its own sets: every contact is answered (a FakeNode's contacts are messages_only,
+ * as the node's are by default), and the first start is 0, before every message a FakeNode holds.
  */
 export function rules(over: Partial<Rules> = {}): Rules {
   return {
+    answer: 'all',
     turnCap: DEFAULT_AGENT_TURN_CAP,
     repliesPerHour: DEFAULT_REPLIES_PER_HOUR,
     firstStart: 0,
@@ -80,6 +82,8 @@ export class FakeNode {
   answered: Array<{ request_id: string; result: string }> = []
   /** Set to make send_to_contact record the message and answer it undelivered. */
   undelivered = false
+  /** Each contact's trust flag, by fingerprint; one not set is messages_only, the node's default. */
+  trust = new Map<string, string>()
   /** Tools that answer the refusal `internal`. */
   failing = new Set<string>()
   private clock = 1_760_000_000
@@ -94,7 +98,7 @@ export class FakeNode {
 
   /** An agent-answered call waiting for an answer, as the node records one (an EventPending change). */
   request(id: string, account = 'acct-1'): void {
-    this.pending.push({ ID: id, ContactFpr: 'fpr-contact', Capability: 'ask_alex', Args: '{}', Status: 'open', ExpiresAt: 0 })
+    this.pending.push({ ID: id, ContactFpr: 'fpr-contact', Capability: 'ask_alex', Args: '{}', TrustFlag: this.trustOf('fpr-contact'), Status: 'open', ExpiresAt: 0 })
     this.change(account, { pending: true })
   }
 
@@ -134,6 +138,10 @@ export class FakeNode {
         })
       })
     }
+  }
+
+  trustOf(fpr: string): string {
+    return this.trust.get(fpr) ?? 'messages_only'
   }
 
   thread(id: string, contact = 'fpr-contact', status = 'active', account = 'acct-1'): void {
@@ -180,6 +188,15 @@ export class FakeNode {
               removed_contact: null,
             })),
         )
+      case 'list_contacts': {
+        // One row per contact a thread names, in the fields of the node's contactView this fake holds.
+        const rows = new Map<string, { fingerprint: string; status: string; trust_flag: string }>()
+        for (const t of this.threads.values()) {
+          if (t.account !== acct || t.contact_status === 'removed') continue
+          rows.set(t.contact_fpr, { fingerprint: t.contact_fpr, status: t.contact_status, trust_flag: this.trustOf(t.contact_fpr) })
+        }
+        return ok([...rows.values()])
+      }
       case 'read_thread': {
         const th = this.threads.get(args.thread_id as string)
         if (!th || th.account !== acct) return refusal('not_found')

@@ -10,6 +10,11 @@ export const DEFAULT_PERSONA_FILE = 'persona.md'
 export const DEFAULT_AGENT_TURN_CAP = 3
 /** How many drafts one contact may have in an hour, whatever the sender labels say. */
 export const DEFAULT_REPLIES_PER_HOUR = 10
+/**
+ * Which contacts are answered: 'trusted', those whose trust flag is may_instruct ("May instruct
+ * your agent" in the portal); or 'all', every active contact.
+ */
+export type Answer = 'trusted' | 'all'
 /** Where the agent keeps what it must remember across restarts: its first-start time. */
 export const DEFAULT_DATA_DIR = 'data'
 
@@ -23,6 +28,7 @@ export interface Config {
   agentTurnCap: number
   repliesPerHour: number
   dataDir: string
+  answer: Answer
 }
 
 const set = (v: string | undefined) => (v === undefined || v.trim() === '' ? undefined : v.trim())
@@ -44,5 +50,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
     agentTurnCap: count(env.HDTP_AGENT_TURN_CAP, DEFAULT_AGENT_TURN_CAP),
     repliesPerHour: count(env.HDTP_AGENT_REPLIES_PER_HOUR, DEFAULT_REPLIES_PER_HOUR),
     dataDir: set(env.HDTP_AGENT_DATA_DIR) ?? DEFAULT_DATA_DIR,
+    // Anything but 'all' is 'trusted': a misspelt setting answers fewer contacts, never more.
+    answer: set(env.HDTP_AGENT_ANSWER) === 'all' ? 'all' : 'trusted',
   }
 }
