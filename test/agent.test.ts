@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import { getProviderConfig, parseModelString } from '@mastra/core/llm'
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_MODEL, readConfig } from '../src/hdtp/config.ts'
 import { FRAME } from '../src/hdtp/prompt.ts'
@@ -16,10 +17,21 @@ describe('the delegate agent', () => {
     expect(instructions('persona.md')).toBe(got)
   })
 
-  it('routes to the configured model, openai/gpt-6-luna by default', () => {
-    expect(DEFAULT_MODEL).toBe('openai/gpt-6-luna')
-    expect(readConfig({}).model).toBe('openai/gpt-6-luna')
+  it('routes to the configured model, openrouter/openai/gpt-6-luna by default', () => {
+    expect(DEFAULT_MODEL).toBe('openrouter/openai/gpt-6-luna')
+    expect(readConfig({}).model).toBe('openrouter/openai/gpt-6-luna')
     expect(readConfig({ HDTP_AGENT_MODEL: 'anthropic/claude-opus-5-5' }).model).toBe('anthropic/claude-opus-5-5')
+  })
+
+  it('defaults to a model the installed router lists, with the key .env.example names', () => {
+    const { provider, modelId } = parseModelString(DEFAULT_MODEL)
+    const router = getProviderConfig(provider ?? '')
+    expect(provider).toBe('openrouter')
+    expect(router?.models).toContain(modelId)
+    expect(router?.apiKeyEnvVar).toBe('OPENROUTER_API_KEY')
+    const example = readFileSync('.env.example', 'utf8')
+    expect(example).toMatch(new RegExp(`^HDTP_AGENT_MODEL=${DEFAULT_MODEL}$`, 'm'))
+    expect(example).toMatch(new RegExp(`^${router?.apiKeyEnvVar}=$`, 'm'))
   })
 
   it('has no memory of its own', () => {
