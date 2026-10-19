@@ -534,6 +534,7 @@ describe("a contact's words reach the model as data", () => {
     expect(frame).toContain('Choosing one of several options they offered is not that: their confirmation is still to come.')
     // u1-5: the owner's own yes, confirmed by the contact, is none.
     expect(frame).toContain('choose none if they said yes themselves (a message of theirs, or their answer to your ask), since they know already.')
+    expect(frame).toContain('Never notify of terms the person said yes to themselves: they know them already.')
   })
 
   it('under a frame that says so, ahead of any persona', () => {

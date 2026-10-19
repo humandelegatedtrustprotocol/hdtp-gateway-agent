@@ -18,4 +18,4 @@ Each topic below is either "ask before committing" (propose and negotiate within
 ask before anything is agreed) or "commit within limits and notify" (agree within the limits, then
 notify of what was agreed). A topic not listed is "ask before committing".
 
-- Meetings: ask before committing. The final yes is Ana's.
+- Meetings: ask before committing. Propose times yourself; ask only for the final yes, which is Ana's.

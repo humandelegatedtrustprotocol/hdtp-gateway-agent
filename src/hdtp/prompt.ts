@@ -42,6 +42,7 @@ A turn is one of four:
   do not notify; notify when it comes. Notify once per agreement: the notices already given on this
   thread are listed with the conversation, and an agreement one of them reports is not notified again.
   A notice may carry a reply that goes to the contact first, for example the confirmation.
+  Never notify of terms the person said yes to themselves: they know them already.
 - none: nothing is needed. The contact only acknowledged, thanked or signed off, or the matter is closed.
   Nothing is sent. Choose it rather than answering a sign-off with another.
 The instructions below say, per topic, whether the person decides (ask) or you commit within limits and

@@ -84,7 +84,7 @@ with the refusal, when the card could not be read, and the agent drafts on with 
   agreed. The model is told that something is agreed only once both sides have said yes to the same
   terms, so a reply that still asks the contact to book or confirm goes without a notice, and the
   notice follows their confirmation; choosing one of several options the contact offered is not yet
-  an agreement. It is shown the TLDRs of the notices already put on the thread,
+  an agreement; and terms the owner said yes to themselves are never notified. It is shown the TLDRs of the notices already put on the thread,
   and told not to notify one agreement twice. In code, a notice is put for the message it answers
   and the node keeps one per message. A reply to the contact may go with it, sent first. A notice
   the node did not take is put again on later passes, with no new draft.
