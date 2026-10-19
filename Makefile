@@ -6,7 +6,8 @@ export MASTRA_AUTO_DETECT_URL := true
 
 .PHONY: check typecheck test build dev
 
-check: typecheck test build
+# build before test: test/cli.test.ts runs `mastra dev`, which needs the build's output.
+check: typecheck build test
 
 typecheck: node_modules
 	npx tsc --noEmit

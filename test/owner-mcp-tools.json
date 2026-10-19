@@ -116,5 +116,34 @@
       ],
       "additionalProperties": false
     }
+  },
+  {
+    "name": "wait_for_updates",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "account_id": {
+          "type": "string"
+        },
+        "since": {
+          "type": [
+            "null",
+            "integer"
+          ],
+          "description": "cursor from a previous wait_for_updates; omit to start from now"
+        },
+        "timeout_sec": {
+          "type": [
+            "null",
+            "integer"
+          ],
+          "description": "seconds to wait for something to happen, from 1 to 25; 25 when omitted"
+        }
+      },
+      "required": [
+        "account_id"
+      ],
+      "additionalProperties": false
+    }
   }
 ]

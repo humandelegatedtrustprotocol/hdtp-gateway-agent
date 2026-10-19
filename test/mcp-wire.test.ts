@@ -18,7 +18,11 @@ describe('the owner MCP over the wire', () => {
   beforeAll(async () => {
     ;({ server, url, unauthorized } = await serve(node))
   })
-  afterAll(() => new Promise<void>((r) => server.close(() => r())))
+  afterAll(() => {
+    // A wait the client let go of is still held by the fake until its clock runs out.
+    server.closeAllConnections()
+    return new Promise<void>((r) => server.close(() => r()))
+  })
 
   it('calls the tools by name with the bearer token, and reads refusals by code', async () => {
     node.thread('th1')
@@ -69,6 +73,27 @@ describe('the owner MCP over the wire', () => {
     expect(replies).toHaveLength(1)
     expect(replies[0]).toMatchObject({ account_id: 'acct-1', contact_fpr: 'fpr-contact', text: 'Yes, Alex is around.' })
     expect(replies[0]!.msg_id).toMatch(/^agent-reply-[0-9a-f]{32}$/)
+  })
+
+  it('waits from a cursor, and ends a held wait when its signal aborts', async () => {
+    const { node: client, disconnect } = connectNode(url, TOKEN)
+    try {
+      const first = await client.waitForUpdates('acct-1', undefined)
+      expect(first).toMatchObject({ threads: null, timed_out: false })
+      const stop = new AbortController()
+      const held = client.waitForUpdates('acct-1', first.cursor, stop.signal).catch((x: unknown) => x)
+      await new Promise((r) => setTimeout(r, 200))
+      const at = Date.now()
+      stop.abort()
+      expect(await held).toBeInstanceOf(NodeRefusal)
+      expect(Date.now() - at).toBeLessThan(2_000)
+      expect(node.waits.slice(-2)).toEqual([
+        { account: 'acct-1', since: undefined },
+        { account: 'acct-1', since: first.cursor },
+      ])
+    } finally {
+      await disconnect()
+    }
   })
 
   it('names a refused token, and a node that cannot be reached, by code', async () => {

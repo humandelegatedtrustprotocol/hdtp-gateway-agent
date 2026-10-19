@@ -51,6 +51,23 @@ export interface AnswerArgs {
   result: string
 }
 
+/**
+ * One answer of wait_for_updates, the fields this agent reads (ownermcp watch.go, waitResult).
+ * The node holds the call until something moves for the account or up to 25 s, then answers.
+ */
+export interface WaitAnswer {
+  /** Where the next wait starts: the newest change the answer read, even when nothing moved. */
+  cursor: number
+  /** The cursor was not one the change log can answer from; what moved before it is not listed. */
+  cursor_expired?: boolean
+  /** Threads that moved since the cursor; null when none did. */
+  threads: Array<{ thread_id: string }> | null
+  /** Agent-answered calls waiting for an answer, a standing total reported on every answer. */
+  pending_requests: number
+  /** The wait ended on the clock rather than on an event. */
+  timed_out: boolean
+}
+
 /** The tools of the owner MCP this agent uses, and nothing else. */
 export interface NodeClient {
   listAccounts(): Promise<string[]>
@@ -59,6 +76,8 @@ export interface NodeClient {
   sendToContact(args: SendArgs): Promise<void>
   listPending(accountId: string): Promise<PendingRequest[]>
   answerRequest(args: AnswerArgs): Promise<void>
+  /** Omitting `since` starts from now: the node answers at once with a cursor and no backlog. */
+  waitForUpdates(accountId: string, since: number | undefined, signal?: AbortSignal): Promise<WaitAnswer>
 }
 
 /** A tool error from the node, by its code. */
@@ -86,7 +105,7 @@ interface ToolAnswer {
   content?: Array<{ type: string; text?: string }>
 }
 
-type CallTool = (name: string, args: Record<string, unknown>) => Promise<ToolAnswer>
+type CallTool = (name: string, args: Record<string, unknown>, signal?: AbortSignal) => Promise<ToolAnswer>
 
 /** The JSON a tool answered with, or a NodeRefusal for a tool error. */
 export function decodeAnswer(tool: string, answer: ToolAnswer): unknown {
@@ -107,7 +126,8 @@ export function decodeAnswer(tool: string, answer: ToolAnswer): unknown {
 
 /** A NodeClient over any way of calling a tool by name. */
 export function nodeClientOver(call: CallTool): NodeClient {
-  const json = async (tool: string, args: Record<string, unknown>) => decodeAnswer(tool, await call(tool, args))
+  const json = async (tool: string, args: Record<string, unknown>, signal?: AbortSignal) =>
+    decodeAnswer(tool, await call(tool, args, signal))
   return {
     async listAccounts() {
       return ((await json('list_accounts', {})) as string[] | null) ?? []
@@ -133,6 +153,10 @@ export function nodeClientOver(call: CallTool): NodeClient {
     },
     async answerRequest(args) {
       await json('answer_request', { ...args })
+    },
+    async waitForUpdates(accountId, since, signal) {
+      const args = since === undefined ? { account_id: accountId } : { account_id: accountId, since }
+      return (await json('wait_for_updates', args, signal)) as WaitAnswer
     },
   }
 }
@@ -162,13 +186,14 @@ export function connectNode(url: string, token: string): { node: NodeClient; dis
     }
     return toolsets.hdtp ?? {}
   }
-  const call: CallTool = async (name, args) => {
+  const call: CallTool = async (name, args, signal) => {
     try {
       const set = await (tools ??= list())
       const tool = set[name]
       if (!tool?.execute) throw new NodeRefusal(name, 'tool_not_offered')
-      // Called by code, outside any agent run: the MCP tool reads only the context's optional members.
-      return (await tool.execute(args, {} as ToolExecutionContext)) as ToolAnswer
+      // Called by code, outside any agent run: the MCP tool reads only the context's optional members,
+      // and hands abortSignal to the request, so stopping a held wait ends it.
+      return (await tool.execute(args, { abortSignal: signal } as ToolExecutionContext)) as ToolAnswer
     } catch (e) {
       tools = null
       throw e instanceof NodeRefusal ? e : new NodeRefusal(name, 'node_unreachable')
