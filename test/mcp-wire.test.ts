@@ -93,7 +93,7 @@ describe('the owner MCP over the wire', () => {
       const responder = new Responder(client, async () => ask('Book Wed?', { When: 'Wed' }, ['Yes, book it']), memoryLog(), rules())
       await responder.onMessage('th3')
       expect(node.asks.filter((a) => a.thread_id === 'th3')).toHaveLength(1)
-      expect((await client.listAsks('acct-1', 'th3')).map((a) => a.status)).toEqual(['open'])
+      expect((await client.listAsks('acct-1', { open: true })).map((a) => [a.thread_id, a.kind, a.status])).toEqual([['th3', 'ask', 'open']])
     } finally {
       await disconnect()
     }

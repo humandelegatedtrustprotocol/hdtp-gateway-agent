@@ -270,8 +270,9 @@ export class Responder {
         return
       }
       const schema = await this.turns.schema()
-      const asks = await this.node.listAsks(accountId, row.thread_id)
-      if (asks.some((a) => a.status === 'open')) {
+      // One open ask per thread, so the account's open asks hold it: newest first, where a
+      // contact's long list (oldest first, cut at the node's limit) would lose it.
+      if ((await this.node.listAsks(accountId, { open: true })).some((a) => a.thread_id === row.thread_id)) {
         this.revisit.delete(where)
         this.waiting.set(where, true)
         this.log.info('ask_open', ids)
@@ -300,7 +301,11 @@ export class Responder {
         this.log.info('agent_turn_cap', { thread_id: row.thread_id, turns })
         return
       }
-      const ask = asks.find((a) => a.for_message_id === newest.message_id)
+      // The ask this message raised, now answered with no message to the contact, or expired. A
+      // message id names one message of one contact, so the contact's list holds it once.
+      const ask = (await this.node.listAsks(accountId, { contactFpr: row.contact_fpr })).find(
+        (a) => a.kind === 'ask' && a.for_message_id === newest.message_id,
+      )
       const allowed = ask ? AFTER_ASK_TURNS : FIRST_TURNS
       await this.attempt(key, where, ids, async () => {
         const turn = await this.write(contact, threadPrompt(messages, schema, allowed, ask), allowed)

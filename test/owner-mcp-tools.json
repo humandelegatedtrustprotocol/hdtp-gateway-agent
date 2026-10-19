@@ -165,340 +165,668 @@
   {
     "name": "ask_owner",
     "inputSchema": {
-      "type": "object",
+      "additionalProperties": false,
       "properties": {
         "account_id": {
-          "type": "string"
-        },
-        "thread_id": {
+          "description": "the account to act on",
+          "minLength": 1,
           "type": "string"
         },
         "for_message_id": {
-          "type": "string",
-          "description": "the contact's message this is about"
+          "description": "the message in the thread it is about, as read_thread names it; asking twice about one message is one ask",
+          "minLength": 1,
+          "type": "string"
         },
-        "components": {
-          "type": "array",
+        "surface": {
+          "description": "An A2UI v0.9.1 surface: a createSurface message naming catalogId https://hdtp.dev/a2ui/v0.9.1/owner-catalog.json, then an updateComponents message for the same surfaceId. One component has id \"root\", a Column. An ask holds at least one of Choice, TextField, DateTimeInput or Button.",
+          "maxItems": 2,
           "minItems": 2,
-          "maxItems": 16,
-          "description": "a root Column, a TLDR Text, KeyValue terms, 1-3 Choice ready replies, TextField last",
-          "items": {
-            "oneOf": [
-              {
-                "$ref": "#/$defs/Column"
+          "prefixItems": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "createSurface": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "catalogId": {
+                      "const": "https://hdtp.dev/a2ui/v0.9.1/owner-catalog.json",
+                      "type": "string"
+                    },
+                    "surfaceId": {
+                      "maxLength": 64,
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "surfaceId",
+                    "catalogId"
+                  ],
+                  "type": "object"
+                },
+                "version": {
+                  "const": "v0.9.1",
+                  "type": "string"
+                }
               },
-              {
-                "$ref": "#/$defs/Text"
+              "required": [
+                "version",
+                "createSurface"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "updateComponents": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "components": {
+                      "items": {
+                        "oneOf": [
+                          {
+                            "additionalProperties": false,
+                            "description": "The root, and only the root (id \"root\"): its children, top to bottom. The first is a Text, the TLDR; a TextField, if there is one, is last.",
+                            "properties": {
+                              "children": {
+                                "description": "The ids of the components under the root, in order.",
+                                "items": {
+                                  "maxLength": 64,
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "maxItems": 19,
+                                "minItems": 1,
+                                "type": "array",
+                                "uniqueItems": true
+                              },
+                              "component": {
+                                "const": "Column",
+                                "type": "string"
+                              },
+                              "id": {
+                                "maxLength": 64,
+                                "minLength": 1,
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "component",
+                              "children"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "description": "A line of text. The first child of root is the TLDR: what the owner needs to know, in at most 280 bytes.",
+                            "properties": {
+                              "component": {
+                                "const": "Text",
+                                "type": "string"
+                              },
+                              "id": {
+                                "maxLength": 64,
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "text": {
+                                "maxLength": 2000,
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "variant": {
+                                "enum": [
+                                  "h1",
+                                  "h2",
+                                  "h3",
+                                  "h4",
+                                  "h5",
+                                  "caption",
+                                  "body"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "component",
+                              "text"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "description": "The key terms, one label and value per row.",
+                            "properties": {
+                              "component": {
+                                "const": "KeyValue",
+                                "type": "string"
+                              },
+                              "id": {
+                                "maxLength": 64,
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "rows": {
+                                "items": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "label": {
+                                      "maxLength": 64,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "value": {
+                                      "maxLength": 280,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "label",
+                                    "value"
+                                  ],
+                                  "type": "object"
+                                },
+                                "maxItems": 8,
+                                "minItems": 1,
+                                "type": "array"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "component",
+                              "rows"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "description": "Ready replies: choosing one sends its label to the contact as the owner's own message.",
+                            "properties": {
+                              "component": {
+                                "const": "Choice",
+                                "type": "string"
+                              },
+                              "id": {
+                                "maxLength": 64,
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "label": {
+                                "description": "What the choice is about.",
+                                "maxLength": 280,
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "options": {
+                                "items": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "label": {
+                                      "description": "The reply itself, as it is sent.",
+                                      "maxLength": 280,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "label"
+                                  ],
+                                  "type": "object"
+                                },
+                                "maxItems": 3,
+                                "minItems": 1,
+                                "type": "array"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "component",
+                              "options"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "description": "Write my own: what the owner types is sent to the contact as their own message. Always last.",
+                            "properties": {
+                              "component": {
+                                "const": "TextField",
+                                "type": "string"
+                              },
+                              "id": {
+                                "maxLength": 64,
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "label": {
+                                "maxLength": 280,
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "variant": {
+                                "enum": [
+                                  "shortText",
+                                  "longText"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "component"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "description": "A date, a time or both, picked by the owner; it answers the ask and sends nothing.",
+                            "properties": {
+                              "component": {
+                                "const": "DateTimeInput",
+                                "type": "string"
+                              },
+                              "enableDate": {
+                                "type": "boolean"
+                              },
+                              "enableTime": {
+                                "type": "boolean"
+                              },
+                              "id": {
+                                "maxLength": 64,
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "label": {
+                                "maxLength": 280,
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "max": {
+                                "description": "ISO 8601.",
+                                "maxLength": 40,
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "min": {
+                                "description": "ISO 8601.",
+                                "maxLength": 40,
+                                "minLength": 1,
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "component"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "description": "A button whose label is a Text (child); pressing it answers the ask and sends nothing.",
+                            "properties": {
+                              "action": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "event": {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                      "context": {
+                                        "additionalProperties": {
+                                          "type": [
+                                            "string",
+                                            "number",
+                                            "boolean"
+                                          ]
+                                        },
+                                        "maxProperties": 8,
+                                        "type": "object"
+                                      },
+                                      "name": {
+                                        "maxLength": 64,
+                                        "minLength": 1,
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "name"
+                                    ],
+                                    "type": "object"
+                                  }
+                                },
+                                "required": [
+                                  "event"
+                                ],
+                                "type": "object"
+                              },
+                              "child": {
+                                "description": "The id of the Text that is its label.",
+                                "maxLength": 64,
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "component": {
+                                "const": "Button",
+                                "type": "string"
+                              },
+                              "id": {
+                                "maxLength": 64,
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "variant": {
+                                "enum": [
+                                  "default",
+                                  "primary",
+                                  "borderless"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "component",
+                              "child",
+                              "action"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "maxItems": 20,
+                      "minItems": 2,
+                      "type": "array"
+                    },
+                    "surfaceId": {
+                      "maxLength": 64,
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "surfaceId",
+                    "components"
+                  ],
+                  "type": "object"
+                },
+                "version": {
+                  "const": "v0.9.1",
+                  "type": "string"
+                }
               },
-              {
-                "$ref": "#/$defs/KeyValue"
-              },
-              {
-                "$ref": "#/$defs/Choice"
-              },
-              {
-                "$ref": "#/$defs/TextField"
-              }
-            ]
-          }
+              "required": [
+                "version",
+                "updateComponents"
+              ],
+              "type": "object"
+            }
+          ],
+          "type": "array"
+        },
+        "thread_id": {
+          "description": "the thread the surface goes on, as get_inbox names it",
+          "minLength": 1,
+          "type": "string"
         }
       },
       "required": [
         "account_id",
         "thread_id",
         "for_message_id",
-        "components"
+        "surface"
       ],
-      "additionalProperties": false,
-      "$defs": {
-        "Column": {
-          "type": "object",
-          "properties": {
-            "id": {
-              "type": "string",
-              "maxLength": 64
-            },
-            "component": {
-              "const": "Column"
-            },
-            "children": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "minItems": 1
-            }
-          },
-          "required": [
-            "id",
-            "component",
-            "children"
-          ],
-          "additionalProperties": false
-        },
-        "Text": {
-          "type": "object",
-          "properties": {
-            "id": {
-              "type": "string",
-              "maxLength": 64
-            },
-            "component": {
-              "const": "Text"
-            },
-            "text": {
-              "type": "string",
-              "maxLength": 280
-            }
-          },
-          "required": [
-            "id",
-            "component",
-            "text"
-          ],
-          "additionalProperties": false
-        },
-        "KeyValue": {
-          "type": "object",
-          "properties": {
-            "id": {
-              "type": "string",
-              "maxLength": 64
-            },
-            "component": {
-              "const": "KeyValue"
-            },
-            "items": {
-              "type": "array",
-              "maxItems": 8,
-              "items": {
-                "type": "object",
-                "properties": {
-                  "key": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "value": {
-                    "type": "string",
-                    "maxLength": 200
-                  }
-                },
-                "required": [
-                  "key",
-                  "value"
-                ],
-                "additionalProperties": false
-              }
-            }
-          },
-          "required": [
-            "id",
-            "component",
-            "items"
-          ],
-          "additionalProperties": false
-        },
-        "Choice": {
-          "type": "object",
-          "properties": {
-            "id": {
-              "type": "string",
-              "maxLength": 64
-            },
-            "component": {
-              "const": "Choice"
-            },
-            "label": {
-              "type": "string",
-              "maxLength": 80
-            },
-            "text": {
-              "type": "string",
-              "maxLength": 2000
-            }
-          },
-          "required": [
-            "id",
-            "component",
-            "label",
-            "text"
-          ],
-          "additionalProperties": false
-        },
-        "TextField": {
-          "type": "object",
-          "properties": {
-            "id": {
-              "type": "string",
-              "maxLength": 64
-            },
-            "component": {
-              "const": "TextField"
-            },
-            "label": {
-              "type": "string",
-              "maxLength": 80
-            }
-          },
-          "required": [
-            "id",
-            "component",
-            "label"
-          ],
-          "additionalProperties": false
-        }
-      }
+      "type": "object"
     }
   },
   {
     "name": "notify_owner",
     "inputSchema": {
-      "type": "object",
+      "additionalProperties": false,
       "properties": {
         "account_id": {
-          "type": "string"
-        },
-        "thread_id": {
+          "description": "the account to act on",
+          "minLength": 1,
           "type": "string"
         },
         "for_message_id": {
-          "type": "string",
-          "description": "the contact's message this is about"
+          "description": "the message in the thread it is about, as read_thread names it; asking twice about one message is one notice",
+          "minLength": 1,
+          "type": "string"
         },
-        "components": {
-          "type": "array",
+        "surface": {
+          "description": "An A2UI v0.9.1 surface: a createSurface message naming catalogId https://hdtp.dev/a2ui/v0.9.1/owner-catalog.json, then an updateComponents message for the same surfaceId. One component has id \"root\", a Column. A notice holds only Text and KeyValue: it tells, and nothing answers it.",
+          "maxItems": 2,
           "minItems": 2,
-          "maxItems": 16,
-          "description": "a root Column, a TLDR Text, KeyValue terms",
-          "items": {
-            "oneOf": [
-              {
-                "$ref": "#/$defs/Column"
+          "prefixItems": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "createSurface": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "catalogId": {
+                      "const": "https://hdtp.dev/a2ui/v0.9.1/owner-catalog.json",
+                      "type": "string"
+                    },
+                    "surfaceId": {
+                      "maxLength": 64,
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "surfaceId",
+                    "catalogId"
+                  ],
+                  "type": "object"
+                },
+                "version": {
+                  "const": "v0.9.1",
+                  "type": "string"
+                }
               },
-              {
-                "$ref": "#/$defs/Text"
+              "required": [
+                "version",
+                "createSurface"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "updateComponents": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "components": {
+                      "items": {
+                        "oneOf": [
+                          {
+                            "additionalProperties": false,
+                            "description": "The root, and only the root (id \"root\"): its children, top to bottom. The first is a Text, the TLDR; a TextField, if there is one, is last.",
+                            "properties": {
+                              "children": {
+                                "description": "The ids of the components under the root, in order.",
+                                "items": {
+                                  "maxLength": 64,
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "maxItems": 19,
+                                "minItems": 1,
+                                "type": "array",
+                                "uniqueItems": true
+                              },
+                              "component": {
+                                "const": "Column",
+                                "type": "string"
+                              },
+                              "id": {
+                                "maxLength": 64,
+                                "minLength": 1,
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "component",
+                              "children"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "description": "A line of text. The first child of root is the TLDR: what the owner needs to know, in at most 280 bytes.",
+                            "properties": {
+                              "component": {
+                                "const": "Text",
+                                "type": "string"
+                              },
+                              "id": {
+                                "maxLength": 64,
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "text": {
+                                "maxLength": 2000,
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "variant": {
+                                "enum": [
+                                  "h1",
+                                  "h2",
+                                  "h3",
+                                  "h4",
+                                  "h5",
+                                  "caption",
+                                  "body"
+                                ],
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "component",
+                              "text"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "description": "The key terms, one label and value per row.",
+                            "properties": {
+                              "component": {
+                                "const": "KeyValue",
+                                "type": "string"
+                              },
+                              "id": {
+                                "maxLength": 64,
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "rows": {
+                                "items": {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "label": {
+                                      "maxLength": 64,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    "value": {
+                                      "maxLength": 280,
+                                      "minLength": 1,
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "label",
+                                    "value"
+                                  ],
+                                  "type": "object"
+                                },
+                                "maxItems": 8,
+                                "minItems": 1,
+                                "type": "array"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "component",
+                              "rows"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "maxItems": 20,
+                      "minItems": 2,
+                      "type": "array"
+                    },
+                    "surfaceId": {
+                      "maxLength": 64,
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "surfaceId",
+                    "components"
+                  ],
+                  "type": "object"
+                },
+                "version": {
+                  "const": "v0.9.1",
+                  "type": "string"
+                }
               },
-              {
-                "$ref": "#/$defs/KeyValue"
-              }
-            ]
-          }
+              "required": [
+                "version",
+                "updateComponents"
+              ],
+              "type": "object"
+            }
+          ],
+          "type": "array"
+        },
+        "thread_id": {
+          "description": "the thread the surface goes on, as get_inbox names it",
+          "minLength": 1,
+          "type": "string"
         }
       },
       "required": [
         "account_id",
         "thread_id",
         "for_message_id",
-        "components"
+        "surface"
       ],
-      "additionalProperties": false,
-      "$defs": {
-        "Column": {
-          "type": "object",
-          "properties": {
-            "id": {
-              "type": "string",
-              "maxLength": 64
-            },
-            "component": {
-              "const": "Column"
-            },
-            "children": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "minItems": 1
-            }
-          },
-          "required": [
-            "id",
-            "component",
-            "children"
-          ],
-          "additionalProperties": false
-        },
-        "Text": {
-          "type": "object",
-          "properties": {
-            "id": {
-              "type": "string",
-              "maxLength": 64
-            },
-            "component": {
-              "const": "Text"
-            },
-            "text": {
-              "type": "string",
-              "maxLength": 280
-            }
-          },
-          "required": [
-            "id",
-            "component",
-            "text"
-          ],
-          "additionalProperties": false
-        },
-        "KeyValue": {
-          "type": "object",
-          "properties": {
-            "id": {
-              "type": "string",
-              "maxLength": 64
-            },
-            "component": {
-              "const": "KeyValue"
-            },
-            "items": {
-              "type": "array",
-              "maxItems": 8,
-              "items": {
-                "type": "object",
-                "properties": {
-                  "key": {
-                    "type": "string",
-                    "maxLength": 64
-                  },
-                  "value": {
-                    "type": "string",
-                    "maxLength": 200
-                  }
-                },
-                "required": [
-                  "key",
-                  "value"
-                ],
-                "additionalProperties": false
-              }
-            }
-          },
-          "required": [
-            "id",
-            "component",
-            "items"
-          ],
-          "additionalProperties": false
-        }
-      }
+      "type": "object"
     }
   },
   {
     "name": "list_asks",
     "inputSchema": {
-      "type": "object",
+      "additionalProperties": false,
       "properties": {
         "account_id": {
           "type": "string"
         },
-        "thread_id": {
+        "contact_fpr": {
+          "description": "one contact's asks and notices, oldest first",
+          "type": "string"
+        },
+        "status": {
+          "description": "open for the asks waiting on the owner; omit for every ask and notice",
           "type": "string"
         }
       },
       "required": [
         "account_id"
       ],
-      "additionalProperties": false
+      "type": "object"
     }
   }
 ]

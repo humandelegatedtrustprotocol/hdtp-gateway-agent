@@ -58,7 +58,7 @@ describe('ask', () => {
     expect(node.asks).toHaveLength(1)
     const put = node.asks[0]!
     expect(put).toMatchObject({ account: 'acct-1', thread_id: 'th1', status: 'open', for_message_id: node.threads.get('th1')!.messages[0]!.message_id })
-    expect(put.components).toEqual(surface('Ben asks to meet Wed 15:00 for 30 min', { When: 'Wed 15:00', Length: '30 min' }, ['Confirm Wed 15:00', 'Offer Thu 10:00']))
+    expect(put.surface).toEqual(surface('Ben asks to meet Wed 15:00 for 30 min', { When: 'Wed 15:00', Length: '30 min' }, ['Confirm Wed 15:00', 'Offer Thu 10:00']))
     expect(codes(log)).toContain('asked')
   })
 
@@ -119,6 +119,36 @@ describe('ask', () => {
     expect(node.sent.map((s) => s.text)).toEqual(['Confirmed: Wednesday 15:00.'])
   })
 
+  it('reads list_asks only as the node answers it, an object holding the rows', async () => {
+    const node = new FakeNode()
+    const bare: NodeClient = nodeClientOver(
+      async (name, args) => (name === 'list_asks' ? { content: [{ type: 'text', text: '[]' }] } : node.call(name, args)),
+      node.catalog,
+    )
+    await expect(bare.listAsks('acct-1', { open: true })).rejects.toMatchObject({ tool: 'list_asks', code: 'unreadable_answer' })
+  })
+
+  it('holds only its own thread: another contact is answered while the ask is open', async () => {
+    const { node, responder } = setup(async (p) => (conversation(p).at(-1)!.text.includes('Wednesday') ? commitment() : reply('Hello Cleo.')))
+    node.inbound('th1', 'Can we lock in Wednesday 15:00?', 'agent')
+    await responder.onMessage('th1')
+    node.thread('th2', 'fpr-cleo')
+    node.inbound('th2', 'Hi, is Alex around?', 'agent')
+    await responder.onMessage('th2')
+    expect(node.sent.map((s) => [s.thread_id, s.text])).toEqual([['th2', 'Hello Cleo.']])
+  })
+
+  it('takes a notice for the newest message for no ask: a later visit offers all four turns', async () => {
+    const offered: string[] = []
+    const draft: Draft = async (p) => (offered.push(/Choose one of these turns: (.*)\./.exec(p)![1]!), notify('Dentist booked Tue 10:00', { When: 'Tue 10:00' }))
+    const { node, responder } = setup(draft)
+    node.inbound('th1', 'You are booked: Tuesday 10:00.', 'agent')
+    await responder.onMessage('th1')
+    // A restarted agent, the same message delivered again.
+    await new Responder(nodeClientOver(node.call, node.catalog), draft, memoryLog(), rules()).onMessage('th1')
+    expect(offered).toEqual(['reply, ask, notify, none', 'reply, ask, notify, none'])
+  })
+
   it('drafts once more for an ask that expired, and says it expired', async () => {
     const { node, prompts, responder } = setup(async () => (prompts.length === 1 ? commitment() : reply('Ana has not decided yet.')))
     node.inbound('th1', 'Can we lock in Wednesday 15:00?', 'agent')
@@ -126,6 +156,7 @@ describe('ask', () => {
     node.expireAsk(node.asks[0]!.id)
     await responder.reconcile()
     expect(prompts[1]).toContain('"status": "expired"')
+    expect(prompts[1]).toContain('"answer": null')
     expect(node.sent.map((s) => s.text)).toEqual(['Ana has not decided yet.'])
   })
 
@@ -134,7 +165,9 @@ describe('ask', () => {
     const { node, log, prompts, responder } = setup(async () => {
       if (!bad) return commitment()
       bad = false
-      return JSON.stringify({ type: 'ask', ask: { components: [{ id: 'root', component: 'Video', src: 'x' }] } })
+      const [create, update] = surface('Lock in Wed 15:00?', { When: 'Wed 15:00' }, ['Yes'])
+      const components = [{ id: 'root', component: 'Column', children: ['v'] }, { id: 'v', component: 'Video', url: 'x' }]
+      return JSON.stringify({ type: 'ask', ask: { surface: [create, { ...update, updateComponents: { surfaceId: 's1', components } }] } })
     })
     node.inbound('th1', 'Can we lock in Wednesday 15:00?', 'agent')
     await responder.onMessage('th1')
@@ -151,7 +184,7 @@ describe('ask', () => {
     node.inbound('th1', 'Can we lock in Wednesday 15:00?', 'agent')
     await responder.onMessage('th1')
     expect(node.asks).toEqual([])
-    expect(log.lines.find((l) => l.code === 'attempt_failed')?.fields).toMatchObject({ reason: 'ask_owner:invalid', attempt: 1 })
+    expect(log.lines.find((l) => l.code === 'attempt_failed')?.fields).toMatchObject({ reason: 'ask_owner:bad_request', attempt: 1 })
     await responder.reconcile()
     expect(prompts).toHaveLength(2)
     expect(node.asks).toHaveLength(1)
@@ -172,7 +205,7 @@ describe('notify', () => {
         account: 'acct-1',
         thread_id: 'th1',
         for_message_id: node.threads.get('th1')!.messages[0]!.message_id,
-        components: surface('Booked: cleaning Tue 10:00', { When: 'Tue 10:00', With: 'Dr. Rao' }),
+        surface: surface('Booked: cleaning Tue 10:00', { When: 'Tue 10:00', With: 'Dr. Rao' }),
       },
     ])
     expect(codes(log).filter((c) => c === 'replied' || c === 'notified')).toEqual(['replied', 'notified'])
@@ -351,7 +384,8 @@ describe('the turn schema', () => {
       expect(a!.properties.ask!.properties).not.toHaveProperty(k)
       expect(n!.properties.notice!.properties).not.toHaveProperty(k)
     }
-    expect(a!.properties.ask!.properties!.components).toEqual((schemaOf('ask_owner') as { properties: Record<string, unknown> }).properties.components)
+    expect(a!.properties.ask!.properties!.surface).toEqual((schemaOf('ask_owner') as { properties: Record<string, unknown> }).properties.surface)
+    expect(n!.properties.notice!.properties!.surface).toEqual((schemaOf('notify_owner') as { properties: Record<string, unknown> }).properties.surface)
   })
 
   it('bounds a reply’s text, alone or with a notice, as send_to_contact bounds it', async () => {
@@ -362,6 +396,18 @@ describe('the turn schema', () => {
     expect((await check.validate({ type: 'reply', text: 'ten chars.' })).issues).toBeUndefined()
     expect((await check.validate({ type: 'reply', text: 'eleven char' })).issues).toBeDefined()
     expect((await check.validate({ type: 'notify', notice, reply: 'eleven char' })).issues).toBeDefined()
+  })
+
+  it('checks a surface in the tools’ dialect, 2020-12, and refuses a tool schema in another', async () => {
+    const check = toStandardSchema(turnSchema(schemaOf('send_to_contact'), schemaOf('ask_owner'), schemaOf('notify_owner')))['~standard']
+    const [create, update] = surface('Lock in Wed 15:00?', { When: 'Wed 15:00' }, ['Yes'])
+    expect((await check.validate({ type: 'ask', ask: { surface: [create, update] } })).issues).toBeUndefined()
+    // prefixItems orders the two messages; a validator in an older dialect would pass these.
+    expect((await check.validate({ type: 'ask', ask: { surface: [update, create] } })).issues).toBeDefined()
+    const draft7 = { ...schemaOf('ask_owner'), $schema: 'http://json-schema.org/draft-07/schema#' }
+    expect(() => turnSchema(schemaOf('send_to_contact'), draft7, schemaOf('notify_owner'))).toThrow(
+      expect.objectContaining({ tool: 'ask_owner', code: 'schema_unexpected' }),
+    )
   })
 
   it('is read once from the node, and again after a failure', async () => {

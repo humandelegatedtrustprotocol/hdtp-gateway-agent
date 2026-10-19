@@ -43,20 +43,31 @@ export const TOOLS = JSON.parse(readFileSync(new URL('./owner-mcp-tools.json', i
 /** The model's answers, as the turn schema has them. */
 export const reply = (text: string) => JSON.stringify({ type: 'reply', text })
 export const none = () => JSON.stringify({ type: 'none' })
-/** An ask's surface in the catalog test/owner-mcp-tools.json holds: a TLDR, terms, ready replies, write-my-own last. */
+/** The owner catalog ask_owner and notify_owner name (test/owner-mcp-tools.json). */
+export const CATALOG_ID = 'https://hdtp.dev/a2ui/v0.9.1/owner-catalog.json'
+/**
+ * An A2UI surface in the node's owner catalog: a TLDR, the terms, and for an ask the ready replies
+ * and a field to write one's own, last.
+ */
 export function surface(tldr: string, terms: Record<string, string>, choices: string[] = []): Array<Record<string, unknown>> {
   const parts: Array<Record<string, unknown>> = [
     { id: 'tldr', component: 'Text', text: tldr },
-    { id: 'terms', component: 'KeyValue', items: Object.entries(terms).map(([key, value]) => ({ key, value })) },
-    ...choices.map((text, i) => ({ id: `choice-${i}`, component: 'Choice', label: text.slice(0, 80), text })),
+    { id: 'terms', component: 'KeyValue', rows: Object.entries(terms).map(([label, value]) => ({ label, value })) },
   ]
-  if (choices.length) parts.push({ id: 'own', component: 'TextField', label: 'Write my own' })
-  return [{ id: 'root', component: 'Column', children: parts.map((c) => c.id) }, ...parts]
+  if (choices.length) {
+    parts.push({ id: 'pick', component: 'Choice', options: choices.map((label) => ({ label })) })
+    parts.push({ id: 'own', component: 'TextField', label: 'Write my own' })
+  }
+  const components = [{ id: 'root', component: 'Column', children: parts.map((c) => c.id) }, ...parts]
+  return [
+    { version: 'v0.9.1', createSurface: { surfaceId: 's1', catalogId: CATALOG_ID } },
+    { version: 'v0.9.1', updateComponents: { surfaceId: 's1', components } },
+  ]
 }
 export const ask = (tldr: string, terms: Record<string, string>, choices: string[]) =>
-  JSON.stringify({ type: 'ask', ask: { components: surface(tldr, terms, choices) } })
+  JSON.stringify({ type: 'ask', ask: { surface: surface(tldr, terms, choices) } })
 export const notify = (tldr: string, terms: Record<string, string>, text?: string) =>
-  JSON.stringify({ type: 'notify', notice: { components: surface(tldr, terms) }, ...(text === undefined ? {} : { reply: text }) })
+  JSON.stringify({ type: 'notify', notice: { surface: surface(tldr, terms) }, ...(text === undefined ? {} : { reply: text }) })
 
 export function memoryLog(): Log & { lines: Array<{ code: string; fields?: Record<string, unknown> }> } {
   const lines: Array<{ code: string; fields?: Record<string, unknown> }> = []
@@ -112,9 +123,9 @@ export class FakeNode {
   /** Tools that answer the refusal `internal`. */
   failing = new Set<string>()
   /** The asks put with ask_owner, and the notices put with notify_owner, as the node holds them. */
-  asks: Array<OwnerAsk & { account: string; components: unknown }> = []
-  notices: Array<{ account: string; thread_id: string; for_message_id: string; components: unknown }> = []
-  /** How many of the next ask_owner calls answer `invalid`, as the node does for a surface outside its catalog. */
+  asks: Array<OwnerAsk & { account: string; contact: string; surface: unknown }> = []
+  notices: Array<{ account: string; thread_id: string; for_message_id: string; surface: unknown }> = []
+  /** How many of the next ask_owner calls answer `bad_request`, as the node does for a surface its catalog refuses. */
   invalidSurfaces = 0
   /** Tools tools/list does not offer, as an older node would not. */
   unlisted = new Set<string>()
@@ -310,10 +321,20 @@ export class FakeNode {
         if (this.asks.some((a) => a.account === acct && a.thread_id === args.thread_id && a.status === 'open')) return refusal('conflict')
         if (this.invalidSurfaces > 0) {
           this.invalidSurfaces--
-          return refusal('invalid')
+          return refusal('bad_request')
         }
         const id = `ask-${this.asks.length + 1}`
-        this.asks.push({ id, account: acct, thread_id: args.thread_id as string, for_message_id: args.for_message_id as string, status: 'open', components: args.components })
+        this.asks.push({
+          id,
+          kind: 'ask',
+          account: acct,
+          contact: th.contact_fpr,
+          thread_id: args.thread_id as string,
+          for_message_id: args.for_message_id as string,
+          status: 'open',
+          answer_text: '',
+          surface: args.surface,
+        })
         this.change(acct, { thread_id: args.thread_id as string })
         return ok({ id, status: 'open' })
       }
@@ -322,16 +343,34 @@ export class FakeNode {
         if (!th || th.account !== acct) return refusal('not_found')
         const same = this.notices.some((n) => n.account === acct && n.thread_id === args.thread_id && n.for_message_id === args.for_message_id)
         if (!same) {
-          this.notices.push({ account: acct, thread_id: args.thread_id as string, for_message_id: args.for_message_id as string, components: args.components })
+          this.notices.push({ account: acct, thread_id: args.thread_id as string, for_message_id: args.for_message_id as string, surface: args.surface })
         }
         return ok({ status: 'posted' })
       }
-      case 'list_asks':
-        return ok(
-          this.asks
-            .filter((a) => a.account === acct && (args.thread_id === undefined || a.thread_id === args.thread_id))
-            .map(({ account: _a, components: _c, ...row }) => row),
-        )
+      case 'list_asks': {
+        // As the node filters them: status open for the open asks, newest first; contact_fpr for one
+        // contact's asks and notices; neither for all. The fake lists its asks before its notices,
+        // not by time; the responder finds a row by its ids, never by its place.
+        if (args.status !== undefined && args.status !== 'open') return refusal('bad_request')
+        const rows = [
+          ...this.asks.map(({ account, contact, surface: _s, ...row }) => ({ account, contact, ...row })),
+          ...this.notices.map((n) => ({
+            account: n.account,
+            contact: this.threads.get(n.thread_id)!.contact_fpr,
+            id: `notice-${n.thread_id}-${n.for_message_id}`,
+            kind: 'notice',
+            thread_id: n.thread_id,
+            for_message_id: n.for_message_id,
+            status: 'posted',
+            answer_text: '',
+          })),
+        ].filter((r) => r.account === acct)
+        const listed =
+          args.contact_fpr !== undefined
+            ? rows.filter((r) => r.contact === args.contact_fpr)
+            : rows.filter((r) => args.status === undefined || (r.kind === 'ask' && r.status === 'open')).reverse()
+        return ok({ asks: listed.map(({ account: _a, ...row }) => row) })
+      }
       case 'wait_for_updates':
         this.waits.push({ account: acct, since: args.since as number | undefined })
         return this.waitAnswer ?? this.wait(acct, args.since as number | undefined)

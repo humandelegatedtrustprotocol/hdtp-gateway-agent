@@ -68,18 +68,22 @@ export interface AnswerArgs {
 export type JsonSchema = Record<string, unknown>
 
 /**
- * One ask this agent put to the owner, the fields it reads (list_asks rows). An ask is open until
- * the owner answers it, the agent withdraws it, or it expires.
+ * One ask or notice on the node, the fields this agent reads (list_asks rows, the asks service's
+ * View). An ask is open until the owner answers it, the agent withdraws it, or it expires.
  */
 export interface OwnerAsk {
   id: string
+  kind: string // ask or notice
   thread_id: string
-  /** The contact's message the ask was raised for. */
+  /** The contact's message the ask or notice was raised for. */
   for_message_id: string
-  status: string // open, answered, withdrawn, expired
-  /** The owner's answer as one line of text, once answered. */
-  answer_text?: string
+  status: string // open, answered, withdrawn, expired; posted for a notice
+  /** The owner's answer as one line of text; empty until answered. */
+  answer_text: string
 }
+
+/** Which asks list_asks lists: the account's open asks, or every ask and notice with one contact. */
+export type AsksOf = { open: true } | { contactFpr: string }
 
 /** ask_owner's and notify_owner's arguments: the ids code fills, and the surface the model wrote. */
 export type SurfaceArgs = Record<string, unknown> & { account_id: string; thread_id: string; for_message_id: string }
@@ -141,8 +145,8 @@ export interface NodeClient {
   askOwner(args: SurfaceArgs): Promise<void>
   /** A notice for the owner, idempotent on for_message_id. */
   notifyOwner(args: SurfaceArgs): Promise<void>
-  /** The asks of a thread, every status. */
-  listAsks(accountId: string, threadId: string): Promise<OwnerAsk[]>
+  /** The account's open asks, newest first, or one contact's asks and notices, oldest first. */
+  listAsks(accountId: string, of: AsksOf): Promise<OwnerAsk[]>
   /** A tool's input schema as the node lists it; tool_not_offered for a tool it does not list. */
   toolSchema(name: string): Promise<JsonSchema>
   /** The node's tools/list, as this client took it. */
@@ -254,8 +258,11 @@ export function nodeClientOver(call: CallTool, catalog: Catalog): NodeClient {
     async notifyOwner(args) {
       await json('notify_owner', { ...args })
     },
-    async listAsks(accountId, threadId) {
-      return ((await json('list_asks', { account_id: accountId, thread_id: threadId })) as OwnerAsk[] | null) ?? []
+    async listAsks(accountId, of) {
+      const args = 'open' in of ? { account_id: accountId, status: 'open' } : { account_id: accountId, contact_fpr: of.contactFpr }
+      const answer = (await json('list_asks', args)) as { asks?: unknown } | null
+      if (!Array.isArray(answer?.asks)) throw new NodeRefusal('list_asks', 'unreadable_answer')
+      return answer.asks as OwnerAsk[]
     },
     toolSchema: (name) => catalog.toolSchema(name),
     listTools: () => catalog.listTools(),

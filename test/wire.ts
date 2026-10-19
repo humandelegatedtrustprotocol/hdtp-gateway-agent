@@ -1,10 +1,10 @@
 // An owner MCP served over HTTP as the node serves it, backed by a FakeNode. owner-mcp-tools.json
 // is the node's tools/list for the eleven tools this agent calls: six captured from hdtp-gateway
 // 4906e99 on 2026-10-18, wait_for_updates from 2170fda on 2026-10-19, and list_contacts from 2170fda
-// on 2026-10-19 (its tools/list over the node's in-memory transport). ask_owner, notify_owner and
-// list_asks are the plan's shape (N1, hdtp-gateway feat/owner-asks), NOT captured: they are
-// replaced by the capture once that branch lists them. Like the node, the server answers server/discover with "method not found" and
-// keeps no session.
+// on 2026-10-19 (its tools/list over the node's in-memory transport), and ask_owner, notify_owner
+// and list_asks from a233c2a on hdtp-gateway's feat/owner-asks (N1) on 2026-10-19, the same way;
+// the other eight read the same at a233c2a. Like the node, the server answers server/discover with
+// "method not found" and keeps no session.
 
 import { createServer, type IncomingMessage, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'

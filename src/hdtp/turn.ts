@@ -14,6 +14,13 @@
 import { toStandardSchema } from '@mastra/core/schema'
 import { NodeRefusal, type JsonSchema, type NodeClient } from './node.ts'
 
+/**
+ * The dialect of every tool input schema: MCP's default, which @mastra/mcp also names on each schema
+ * it reads. The turn schema is checked in it; a validator left to its own default would pass over
+ * the 2020-12 keywords the node uses (prefixItems, for a surface's two messages) unchecked.
+ */
+export const DIALECT = 'https://json-schema.org/draft/2020-12/schema'
+
 /** The arguments of ask_owner and notify_owner that code fills, never the model. */
 export const FILLED_BY_CODE = ['account_id', 'thread_id', 'for_message_id'] as const
 
@@ -52,6 +59,13 @@ function hoist(schemas: Array<[string, JsonSchema]>): Record<string, unknown> {
 
 /** The turn schema, from the node's input schemas of send_to_contact, ask_owner and notify_owner. */
 export function turnSchema(send: JsonSchema, ask: JsonSchema, notify: JsonSchema): JsonSchema {
+  for (const [tool, schema] of [
+    ['send_to_contact', send],
+    ['ask_owner', ask],
+    ['notify_owner', notify],
+  ] as const) {
+    if (schema.$schema !== undefined && schema.$schema !== DIALECT) throw new NodeRefusal(tool, 'schema_unexpected')
+  }
   const text = (send.properties as Record<string, JsonSchema> | undefined)?.text
   if (!text) throw new NodeRefusal('send_to_contact', 'schema_unexpected')
   const defs = hoist([
@@ -65,6 +79,7 @@ export function turnSchema(send: JsonSchema, ask: JsonSchema, notify: JsonSchema
     additionalProperties: false,
   })
   return {
+    $schema: DIALECT,
     ...(Object.keys(defs).length ? { $defs: defs } : {}),
     oneOf: [
       branch('reply', { text }, ['text']),

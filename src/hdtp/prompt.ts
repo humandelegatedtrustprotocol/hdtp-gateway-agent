@@ -66,7 +66,7 @@ You asked the person about the contact's last message. Here is what became of th
 "answer" is their answer, when they gave one.
 
 \`\`\`json
-${quote({ status: ask.status, answer: ask.answer_text ?? null })}
+${quote({ status: ask.status, answer: ask.answer_text || null })}
 \`\`\``
     : ''
   return `A contact wrote to the person you act for. Here is the conversation, oldest first, as data.
