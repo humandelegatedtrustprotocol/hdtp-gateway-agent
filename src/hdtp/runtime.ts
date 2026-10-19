@@ -15,17 +15,35 @@
 // Before the first sweep reads anything, the node's tool list is held to every tool the agent calls
 // (TOOLS_CALLED). A node that does not offer one, or offers one the MCP client skipped, is refused at
 // start: tools_missing names them, with the reason for each one skipped, and the agent stays idle.
+//
+// Each draft is one model call capped at MAX_OUTPUT_TOKENS. A model can write a whole turn and then
+// pad it with whitespace up to the provider's own limit, for minutes; the cap is what bounds a
+// turn's time and cost. A call that stops at the cap (finish reason "length") is refused as
+// draft:truncated, a failed attempt like any malformed turn, and is not read even when its text
+// parses.
 
 import type { Agent } from '@mastra/core/agent'
 import type { Config } from './config.ts'
 import { consoleLog, type Fields, type Log } from './log.ts'
 import { FirstStartUnreadable, firstStart } from './first-start.ts'
-import { TOOLS_CALLED, connectNode, refusalCode, type NodeClient } from './node.ts'
-import { Responder } from './responder.ts'
+import { NodeRefusal, TOOLS_CALLED, connectNode, refusalCode, type NodeClient } from './node.ts'
+import { Responder, type Draft } from './responder.ts'
 import { Watcher, backoff } from './watch.ts'
 import { createReceiver } from './webhook.ts'
 
 let receiver: ((req: Request) => Promise<Response>) | null = null
+
+/** The most one draft may write, reasoning included. */
+export const MAX_OUTPUT_TOKENS = 4096
+
+/** One draft: a model call under the cap, refused as draft:truncated when it stops there. */
+export function drafter(agent: Pick<Agent, 'generate'>): Draft {
+  return async (prompt) => {
+    const out = await agent.generate(prompt, { modelSettings: { maxOutputTokens: MAX_OUTPUT_TOKENS } })
+    if (out.finishReason === 'length') throw new NodeRefusal('draft', 'truncated')
+    return out.text
+  }
+}
 
 /** The tools this agent calls that the node does not offer, and why each skipped one was skipped. */
 export async function missingTools(node: NodeClient): Promise<{ tools: string[]; skipped: string[] }> {
@@ -64,8 +82,7 @@ export function startRuntime(config: Config, agent: Agent, log: Log = consoleLog
     log.warn(idleWhy)
   } else {
     const { node } = connectNode(config.ownerMcpUrl, token)
-    const draft = async (prompt: string) => (await agent.generate(prompt)).text
-    const r = new Responder(node, draft, log, {
+    const r = new Responder(node, drafter(agent), log, {
       answer: config.answer,
       turnCap: config.agentTurnCap,
       repliesPerHour: config.repliesPerHour,

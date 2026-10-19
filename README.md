@@ -42,7 +42,10 @@ For the contact's newest message the model returns one JSON object, one of four 
 it against a schema built from the node's own tool schemas (read from its `tools/list`), and refuses
 anything else by code (`draft:invalid_turn`); a refused turn is drafted again on a later pass, up to
 3 attempts, as a failed draft always was. A null the schema does not take is read as the field left
-out, so a null on an optional field passes and one on a required field is still refused.
+out, so a null on an optional field passes and one on a required field is still refused. Each
+draft is one model call capped at 4096 output tokens, reasoning included; a call that stops at the
+cap is refused (`draft:truncated`) and counts as a failed attempt, so a model that pads a turn
+cannot hold a thread for minutes. The cap is fixed in code, not a setting.
 
 - **reply**: a message to the contact, sent with `send_to_contact`.
 - **ask**: a card for the owner, put with `ask_owner` for the message it is about, from the node's

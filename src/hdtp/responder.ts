@@ -74,7 +74,10 @@ import { Budget } from './budget.ts'
 import type { Answer } from './config.ts'
 import { Turns, type Turn, type TurnType } from './turn.ts'
 
-/** Writes the model's answer for a prompt: a turn, as JSON text. The model behind it has no tools. */
+/**
+ * Writes the model's answer for a prompt: a turn, as JSON text. The model behind it has no tools.
+ * It throws a NodeRefusal to refuse an answer by code (runtime.ts: draft:truncated).
+ */
 export type Draft = (prompt: string) => Promise<string>
 
 /** The turns offered for a message with no ask, and for one whose ask is no longer open. */
@@ -404,7 +407,9 @@ export class Responder {
     let text: string
     try {
       text = (await this.draft(prompt)).trim()
-    } catch {
+    } catch (e) {
+      // A refusal the draft names (draft:truncated) keeps its code; anything else is the model failing.
+      if (e instanceof NodeRefusal) throw e
       throw new NodeRefusal('draft', 'model_failed')
     }
     if (!text) throw new NodeRefusal('draft', 'empty')
