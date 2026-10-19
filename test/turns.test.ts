@@ -1,6 +1,7 @@
 // The four turns: reply, ask, notify and none, against an owner MCP that holds asks and notices as
 // the node does (test/fakes.ts), with the turn schema read from its tools/list.
 
+import { toStandardSchema } from '@mastra/core/schema'
 import { describe, expect, it } from 'vitest'
 import { nodeClientOver, type NodeClient } from '../src/hdtp/node.ts'
 import { FIRST_TURNS, MAX_ATTEMPTS, Responder, type Draft, type Rules } from '../src/hdtp/responder.ts'
@@ -211,6 +212,10 @@ describe('notify', () => {
     for (let i = 0; i < MAX_ATTEMPTS + 2; i++) await responder.reconcile()
     expect(node.calls.filter((c) => c === 'notify_owner')).toHaveLength(MAX_ATTEMPTS)
     expect(codes(log).filter((c) => c === 'gave_up')).toHaveLength(1)
+    // Given up: the thread, read and answered, is not visited again.
+    const visits = node.calls.filter((c) => c === 'list_asks').length
+    await responder.reconcile()
+    expect(node.calls.filter((c) => c === 'list_asks')).toHaveLength(visits)
   })
 })
 
@@ -347,6 +352,16 @@ describe('the turn schema', () => {
       expect(n!.properties.notice!.properties).not.toHaveProperty(k)
     }
     expect(a!.properties.ask!.properties!.components).toEqual((schemaOf('ask_owner') as { properties: Record<string, unknown> }).properties.components)
+  })
+
+  it('bounds a reply’s text, alone or with a notice, as send_to_contact bounds it', async () => {
+    const send = structuredClone(schemaOf('send_to_contact')) as { properties: { text: Record<string, unknown> } }
+    send.properties.text.maxLength = 10
+    const check = toStandardSchema(turnSchema(send, schemaOf('ask_owner'), schemaOf('notify_owner')))['~standard']
+    const notice = (JSON.parse(notify('t', { a: 'b' })) as { notice: unknown }).notice
+    expect((await check.validate({ type: 'reply', text: 'ten chars.' })).issues).toBeUndefined()
+    expect((await check.validate({ type: 'reply', text: 'eleven char' })).issues).toBeDefined()
+    expect((await check.validate({ type: 'notify', notice, reply: 'eleven char' })).issues).toBeDefined()
   })
 
   it('is read once from the node, and again after a failure', async () => {
