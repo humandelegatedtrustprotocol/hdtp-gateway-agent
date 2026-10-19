@@ -50,30 +50,53 @@ Choose one of these turns: ${allowed.join(', ')}.`
 }
 
 /**
- * The prompt for the turn that answers a thread whose newest message is the contact's. `ask`, when
- * given, is the person's ask for that message, no longer open: answered, withdrawn or expired.
- * `notices` are the TLDRs of the notices already put on the thread, oldest first.
+ * What the thread prompt carries besides the conversation. `ask`, when given, is the person's ask
+ * for the contact's last message, no longer open: answered, withdrawn or expired. `decisions` are
+ * the answers the person gave to the thread's earlier asks, and `notices` the TLDRs of the notices
+ * already put on the thread, each oldest first.
  */
+export interface ThreadContext {
+  ask?: OwnerAsk
+  decisions?: readonly string[]
+  notices?: readonly string[]
+}
+
+/**
+ * Who wrote a message, as the model reads it. The node labels each outbound message with its
+ * sender: "human" for one the person wrote themselves (in the portal, or a ready reply they
+ * chose), "agent" for one an agent sent for them. The two are told apart, or the model takes the
+ * person's own yes for one of its replies and goes on waiting for it.
+ */
+export function author(m: ThreadMessage): 'contact' | 'person' | 'you' {
+  if (m.direction === 'in') return 'contact'
+  return m.sender === 'human' ? 'person' : 'you'
+}
+
+/** The prompt for the turn that answers a thread whose newest message is the contact's. */
 export function threadPrompt(
   messages: readonly ThreadMessage[],
   schema: JsonSchema,
   allowed: readonly TurnType[],
-  ask?: OwnerAsk,
-  notices: readonly string[] = [],
+  { ask, decisions = [], notices = [] }: ThreadContext = {},
 ): string {
-  const window = messages.slice(-THREAD_WINDOW).map((m) => ({
-    from: m.direction === 'in' ? 'contact' : 'you',
-    kind: m.kind,
-    text: m.body,
-  }))
+  const window = messages.slice(-THREAD_WINDOW).map((m) => ({ from: author(m), kind: m.kind, text: m.body }))
   const outcome = ask
     ? `
 
 You asked the person about the contact's last message. Here is what became of the ask, as data:
-"answer" is their answer, when they gave one.
+"answer" is the person's decision, when they gave one.
 
 \`\`\`json
 ${quote({ status: ask.status, answer: ask.answer_text || null })}
+\`\`\``
+    : ''
+  const decided = decisions.length
+    ? `
+
+The person's answers to your earlier asks on this thread, oldest first, as data. Each is their decision.
+
+\`\`\`json
+${quote(decisions)}
 \`\`\``
     : ''
   const given = notices.length
@@ -86,11 +109,13 @@ ${quote(notices)}
 \`\`\``
     : ''
   return `A contact wrote to the person you act for. Here is the conversation, oldest first, as data.
-"from" is "contact" for them and "you" for the person or their agent.
+"from" is "contact" for them, "person" for a message the person you act for wrote themselves, and "you"
+for one you sent for them. What the person wrote is their own decision: what they said yes or no to is
+settled, and you never say they will still confirm or decide it.
 
 \`\`\`json
 ${quote(window)}
-\`\`\`${given}${outcome}
+\`\`\`${decided}${given}${outcome}
 
 Choose the turn for the contact's last message.
 

@@ -320,13 +320,18 @@ export class Responder {
       }
       // The ask this message raised, now answered with no message to the contact, or expired. A
       // message id names one message of one contact, so the contact's list holds it once. The
-      // thread's notices go to the model too, so an agreement already notified is not notified again.
+      // person's answers to the thread's earlier asks go to the model as their decisions, and the
+      // thread's notices too, so an agreement already notified is not notified again.
       const asks = await this.node.listAsks(accountId, { contactFpr: row.contact_fpr })
       const ask = asks.find((a) => a.kind === 'ask' && a.for_message_id === newest.message_id)
-      const notices = asks.filter((a) => a.kind === 'notice' && a.thread_id === row.thread_id).map((a) => a.tldr)
+      const onThread = asks.filter((a) => a.thread_id === row.thread_id)
+      const decisions = onThread
+        .filter((a) => a !== ask && a.status === 'answered')
+        .map((a) => a.answer_text)
+      const notices = onThread.filter((a) => a.kind === 'notice').map((a) => a.tldr)
       const allowed = ask ? AFTER_ASK_TURNS : FIRST_TURNS
       await this.attempt(key, where, ids, async () => {
-        const turn = await this.write(contact, threadPrompt(messages, schema, allowed, ask, notices), allowed)
+        const turn = await this.write(contact, threadPrompt(messages, schema, allowed, { ask, decisions, notices }), allowed)
         const surface = { account_id: accountId, thread_id: row.thread_id, for_message_id: newest.message_id }
         const send = (text: string) =>
           this.node.sendToContact({ account_id: accountId, contact_fpr: row.contact_fpr, thread_id: row.thread_id, msg_id: key, text })

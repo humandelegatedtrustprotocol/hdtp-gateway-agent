@@ -93,7 +93,7 @@ describe('ask', () => {
     expect(prompts).toHaveLength(2)
     expect(conversation(prompts[1]!).map((m) => [m.from, m.text])).toEqual([
       ['contact', 'Can we lock in Wednesday 15:00?'],
-      ['you', 'Confirm Wed 15:00'],
+      ['person', 'Confirm Wed 15:00'],
       ['contact', 'Booked: Wednesday 15:00, 30 minutes.'],
     ])
     expect(node.sent).toEqual([])
@@ -189,6 +189,58 @@ describe('ask', () => {
     expect(prompts).toHaveLength(2)
     expect(node.asks).toHaveLength(1)
     expect(node.sent).toEqual([])
+  })
+})
+
+describe('whose message it is', () => {
+  // Observed on U1 (2026-10-19): Ana typed her yes in the portal, the thread showed it as "you", and
+  // her agent answered Ben's confirmation with "Ana will confirm the time herself".
+  it('shows the person’s own message as theirs, and their yes as settled, not one still to come', async () => {
+    const { node, prompts, responder } = setup(async () => none())
+    node.inbound('th1', 'Can we meet Wednesday 15:00 for 30 minutes?', 'agent')
+    node.outbound('th1', 'Let me check with Ana and come back to you.', 'agent')
+    node.outbound('th1', 'Yes, that works for me. Confirmed.', 'human')
+    node.inbound('th1', 'Great, Wednesday 15:00 it is.', 'agent')
+    await responder.onMessage('th1')
+    const prompt = prompts[0]!
+    expect(conversation(prompt).map((m) => [m.from, m.text])).toEqual([
+      ['contact', 'Can we meet Wednesday 15:00 for 30 minutes?'],
+      ['you', 'Let me check with Ana and come back to you.'],
+      ['person', 'Yes, that works for me. Confirmed.'],
+      ['contact', 'Great, Wednesday 15:00 it is.'],
+    ])
+    expect(prompt).toContain('"person" for a message the person you act for wrote themselves')
+    expect(prompt).toContain('you never say they will still confirm or decide it')
+  })
+
+  it('shows the person’s answers to the thread’s earlier asks as their decisions, and nothing else', async () => {
+    const { node, prompts, responder } = setup(async (p) => {
+      const last = conversation(p).at(-1)!.text
+      const first = /Choose one of these turns: .*\bask\b/.test(p)
+      if (last === 'How about Wednesday 15:00?') return first ? ask('Ben proposes Wed 15:00', { When: 'Wed 15:00' }, ['Offer Thu 10:00']) : reply('Could Thursday 10:00 work instead?')
+      if (last === 'Lunch on Friday?') return first ? ask('Cleo asks for lunch on Friday', { When: 'Fri' }, ['Friday works']) : none()
+      return none()
+    })
+    node.inbound('th1', 'How about Wednesday 15:00?', 'agent')
+    await responder.onMessage('th1')
+    node.thread('th2')
+    node.inbound('th2', 'Lunch on Friday?', 'agent')
+    await responder.onMessage('th2')
+    const [onTh1, onTh2] = node.asks
+    // An ask of this thread that expired unanswered is no decision; nor is an answer on another thread.
+    node.asks.push({ ...onTh1!, id: 'ask-expired', for_message_id: 'msg-older', status: 'expired', answer_text: '' })
+    node.answerAsk(onTh2!.id, 'Ana chose: "Friday works"', false)
+    node.answerAsk(onTh1!.id, 'Ana chose: "Offer Thu 10:00"', false)
+    await responder.reconcile()
+    const afterAsk = prompts.find((p) => conversation(p).at(-1)!.text === 'How about Wednesday 15:00?' && !/Choose one of these turns: .*\bask\b/.test(p))!
+    node.inbound('th1', 'Thursday 10:00 works.', 'agent')
+    await responder.onMessage('th1')
+    const decided = (p: string) => p.match(/The person's answers to your earlier asks on this thread, oldest first, as data\. Each is their decision\.\n\n```json\n([\s\S]*?)\n```/)?.[1]
+    expect(conversation(prompts.at(-1)!).at(-1)!.text).toBe('Thursday 10:00 works.')
+    expect(decided(prompts.at(-1)!)).toBe(JSON.stringify(['Ana chose: "Offer Thu 10:00"'], null, 2))
+    // The ask the contact's last message raised is that message's outcome, not an earlier decision.
+    expect(decided(afterAsk)).toBeUndefined()
+    expect(afterAsk).toContain('"answer" is the person\'s decision')
   })
 })
 

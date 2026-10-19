@@ -47,6 +47,13 @@ draft is one model call capped at 4096 output tokens, reasoning included; a call
 cap is refused (`draft:truncated`) and counts as a failed attempt, so a model that pads a turn
 cannot hold a thread for minutes. The cap is fixed in code, not a setting.
 
+The model sees the thread's newest 20 messages with who wrote each, from the node's sender label:
+the contact, the owner (a message they wrote in the portal, or a ready reply they chose), or the
+agent itself. It is told that what the owner wrote is their decision, so a yes they already gave is
+not treated as one still to come. Their answers to the thread's earlier asks are shown to it as
+their decisions too. The node gives the agent no display name for its owner, so the model knows the
+owner by role, and by the name the persona uses.
+
 - **reply**: a message to the contact, sent with `send_to_contact`.
 - **ask**: a card for the owner, put with `ask_owner` for the message it is about, from the node's
   component catalog: a one-line TLDR and the key terms first, one to three ready replies, and a box
