@@ -3,12 +3,15 @@
 // A turn (turn.ts) is a reply to the contact, an ask for the owner, a notice for the owner after an
 // optional reply, or none. An ask is put with ask_owner, keyed on the message it is about; while any
 // ask of a thread is open the thread is not drafted for, and it is checked before read_thread, so a
-// contact's newer message stays unread for the owner. The node holds the ask, so this survives a
-// restart. When the owner taps a ready reply or writes their own, the node sends it to the contact
-// as the owner's message, and the thread's newest message is then this side's. An ask that is no
-// longer open while its message is still the newest (answered with no message, withdrawn or
-// expired) is drafted for once more, with what became of it quoted to the model, and a reply,
-// notice or none is offered then, not another ask. none sends nothing and counts as answered: the
+// contact's newer message stays unread for the owner. The node holds the ask, so the hold survives a
+// restart: every visit reads list_asks first. When the owner taps a ready reply or writes their own,
+// the node sends it to the contact as the owner's message, and the thread's newest message is then
+// this side's. An ask that is no longer open while its message is still the newest (answered with no
+// message, withdrawn or expired) is drafted for once more, with what became of it quoted to the
+// model, and a reply, notice or none is offered then, not another ask. That redraft does not survive
+// a restart: the threads with an open ask are kept in memory (waiting), and after a restart a read
+// thread is visited again only when it moves, so an ask that ends after a restart, or ended just
+// before one, gets no redraft; the thread's next contact message is answered as any other. none sends nothing and counts as answered: the
 // message is not drafted for again. A notice that notify_owner did not take is kept and put again
 // on later passes, with no new draft, since the reply before it already moved the thread on.
 //

@@ -70,7 +70,10 @@ with the refusal, when the card could not be read, and the agent drafts on with 
   A ready reply the owner taps, or words they write, are sent to the contact by the node as the
   owner's message; the agent then carries on from the thread. An ask that ends with its message still
   the newest (answered with no message, or expired) is drafted for once more, with what became of it,
-  and only a reply, a notice or none is offered then. The model is told to ask only where the
+  and only a reply, a notice or none is offered then. Across a restart of the agent the hold survives,
+  since the node keeps the ask and every visit checks it; the once-more draft does not, since the
+  agent keeps the threads it is waiting on in memory: an ask that ends after a restart, or just before
+  one, is not drafted for again, and the thread's next message from the contact is answered as usual. The model is told to ask only where the
   persona makes the decision the owner's for the topic, and to reply while it can answer within the
   owner's limits, offering times or terms included, so the ask comes when the contact's definite terms
   wait for the owner's yes; and that each ready reply is the owner's own message, first person and complete,
