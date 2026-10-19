@@ -5,8 +5,9 @@
 // send_to_contact's result in Go's field names, which carry no json tags. A refusal is a tool
 // error whose text is {"code", "detail"}; only the code is kept.
 
+import { standardSchemaToJSONSchema } from '@mastra/core/schema'
 import type { ToolExecutionContext } from '@mastra/core/tools'
-import { MCPClient } from '@mastra/mcp'
+import { MCPClient, type LogMessage } from '@mastra/mcp'
 
 /** One row of get_inbox. */
 export interface InboxThread {
@@ -63,6 +64,34 @@ export interface AnswerArgs {
   result: string
 }
 
+/** A tool's input schema, as the node lists it in tools/list. */
+export type JsonSchema = Record<string, unknown>
+
+/**
+ * One ask or notice on the node, the fields this agent reads (list_asks rows, the asks service's
+ * View). An ask is open until the owner answers it, the agent withdraws it, or it expires.
+ */
+export interface OwnerAsk {
+  id: string
+  kind: string // ask or notice
+  thread_id: string
+  /** The contact's message the ask or notice was raised for. */
+  for_message_id: string
+  status: string // open, answered, withdrawn, expired; posted for a notice
+  /** The surface's one-line TLDR, its first Text. */
+  tldr: string
+  /** The owner's answer as one line of text; empty until answered. */
+  answer_text: string
+}
+
+/** export_card's answer, the field this agent reads: the account's card name, "" when it has none. */
+export interface CardFacts {
+  display_name?: string
+}
+
+/** ask_owner's and notify_owner's arguments: the ids code fills, and the surface the model wrote. */
+export type SurfaceArgs = Record<string, unknown> & { account_id: string; thread_id: string; for_message_id: string }
+
 /**
  * One answer of wait_for_updates, the fields this agent reads (ownermcp watch.go, waitResult).
  * The node holds the call until something moves for the account or up to 25 s, then answers.
@@ -80,6 +109,32 @@ export interface WaitAnswer {
   timed_out: boolean
 }
 
+/** Every tool of the owner MCP this agent calls. The runtime answers nothing until the node lists them all. */
+export const TOOLS_CALLED = [
+  'list_accounts',
+  'get_inbox',
+  'list_contacts',
+  'read_thread',
+  'send_to_contact',
+  'list_pending',
+  'answer_request',
+  'wait_for_updates',
+  'ask_owner',
+  'notify_owner',
+  'list_asks',
+  'export_card',
+] as const
+
+/**
+ * The node's tools as this client can call them: those offered, and those the node listed and the
+ * client skipped for its input schema, each with the fault's code (schema_too_deep, schema_too_large,
+ * schema_invalid).
+ */
+export interface ToolListing {
+  offered: string[]
+  skipped: Record<string, string>
+}
+
 /** The tools of the owner MCP this agent uses, and nothing else. */
 export interface NodeClient {
   listAccounts(): Promise<string[]>
@@ -91,6 +146,18 @@ export interface NodeClient {
   answerRequest(args: AnswerArgs): Promise<void>
   /** Omitting `since` starts from now: the node answers at once with a cursor and no backlog. */
   waitForUpdates(accountId: string, since: number | undefined, signal?: AbortSignal): Promise<WaitAnswer>
+  /** An ask for the owner, idempotent on for_message_id. */
+  askOwner(args: SurfaceArgs): Promise<void>
+  /** A notice for the owner, idempotent on for_message_id. */
+  notifyOwner(args: SurfaceArgs): Promise<void>
+  /** One thread's asks and notices, newest first, the node's newest 100. */
+  listAsks(accountId: string, threadId: string): Promise<OwnerAsk[]>
+  /** The owner's display name: the account's card name, "" when the card has none. */
+  ownerName(accountId: string): Promise<string>
+  /** A tool's input schema as the node lists it; tool_not_offered for a tool it does not list. */
+  toolSchema(name: string): Promise<JsonSchema>
+  /** The node's tools/list, as this client took it. */
+  listTools(): Promise<ToolListing>
 }
 
 /** A tool error from the node, by its code. */
@@ -99,13 +166,23 @@ export class NodeRefusal extends Error {
   readonly code: string
   /** send_to_contact only: the message was recorded, and the node goes on delivering it. */
   readonly recorded: boolean
-  constructor(tool: string, code: string, recorded = false) {
+  /** Which of the node's rules refused it, as the node names it ("invalid_surface:<rule>"); "" for none. */
+  readonly reason: string
+  constructor(tool: string, code: string, recorded = false, reason = '') {
     super(`${tool}: ${code}`)
     this.tool = tool
     this.code = code
     this.recorded = recorded
+    this.reason = reason
   }
 }
+
+/**
+ * A refusal's reason as the node sends it beside the code: a code of its own, lower-case words
+ * with at most one colon, at most 64 bytes. Anything else is not kept, so no text reaches the log.
+ */
+export const REASON = /^[a-z][a-z0-9_]*(:[a-z][a-z0-9_]*)?$/
+const reasonOf = (v: unknown): string => (typeof v === 'string' && v.length <= 64 && REASON.test(v) ? v : '')
 
 /** What to log for a failure: the refusal's tool and code, never an error's text. */
 export function refusalCode(e: unknown): string {
@@ -130,15 +207,21 @@ export function decodeAnswer(tool: string, answer: ToolAnswer): unknown {
     throw new NodeRefusal(tool, 'unreadable_answer')
   }
   if (answer.isError) {
-    const v = value as { code?: unknown; ThreadID?: unknown } | null
+    const v = value as { code?: unknown; reason?: unknown; ThreadID?: unknown } | null
     const recorded = typeof v?.ThreadID === 'string' && v.ThreadID !== ''
-    throw new NodeRefusal(tool, typeof v?.code === 'string' ? v.code : 'tool_error', recorded)
+    throw new NodeRefusal(tool, typeof v?.code === 'string' ? v.code : 'tool_error', recorded, reasonOf(v?.reason))
   }
   return value
 }
 
-/** A NodeClient over any way of calling a tool by name. */
-export function nodeClientOver(call: CallTool): NodeClient {
+/** What the node lists: a tool's input schema, and the listing itself. */
+export interface Catalog {
+  toolSchema(name: string): Promise<JsonSchema>
+  listTools(): Promise<ToolListing>
+}
+
+/** A NodeClient over any way of calling a tool by name and of reading the node's tool list. */
+export function nodeClientOver(call: CallTool, catalog: Catalog): NodeClient {
   const json = async (tool: string, args: Record<string, unknown>, signal?: AbortSignal) =>
     decodeAnswer(tool, await call(tool, args, signal))
   return {
@@ -186,11 +269,50 @@ export function nodeClientOver(call: CallTool): NodeClient {
       }
       return answer as WaitAnswer
     },
+    async askOwner(args) {
+      await json('ask_owner', { ...args })
+    },
+    async notifyOwner(args) {
+      await json('notify_owner', { ...args })
+    },
+    async listAsks(accountId, threadId) {
+      const answer = (await json('list_asks', { account_id: accountId, thread_id: threadId })) as { asks?: unknown } | null
+      if (!Array.isArray(answer?.asks)) throw new NodeRefusal('list_asks', 'unreadable_answer')
+      return answer.asks as OwnerAsk[]
+    },
+    async ownerName(accountId) {
+      const card = (await json('export_card', { account_id: accountId })) as CardFacts | null
+      const name = card?.display_name ?? ''
+      if (typeof name !== 'string') throw new NodeRefusal('export_card', 'unreadable_answer')
+      return name.trim()
+    },
+    toolSchema: (name) => catalog.toolSchema(name),
+    listTools: () => catalog.listTools(),
   }
+}
+
+/**
+ * The code for a tool @mastra/mcp skipped while listing, read from its log line: the warning that
+ * names the tool and its input schema's fault. Null for any other line.
+ */
+export function skippedTool(m: Pick<LogMessage, 'level' | 'details'>): { tool: string; code: string } | null {
+  const d = m.details ?? {}
+  if (m.level === 'warning' && typeof d.toolName === 'string' && typeof d.reason === 'string') {
+    const code = d.reason.includes('maximum depth')
+      ? 'schema_too_deep'
+      : d.reason.includes('maximum node count')
+        ? 'schema_too_large'
+        : 'schema_invalid'
+    return { tool: d.toolName, code }
+  }
+  return null
 }
 
 /** The MCP client for the node's owner MCP under a bearer token, and the NodeClient over it. */
 export function connectNode(url: string, token: string): { node: NodeClient; disconnect: () => Promise<void> } {
+  // The client skips a listed tool it cannot use and says so only in a log line; the reason is kept
+  // here as a code, by tool, for the listing that was being read.
+  let skipped: Record<string, string> = {}
   const mcp = new MCPClient({
     id: 'hdtp-owner-mcp',
     servers: {
@@ -199,33 +321,62 @@ export function connectNode(url: string, token: string): { node: NodeClient; dis
         requestInit: { headers: { Authorization: `Bearer ${token}` } },
         onToolError: 'return',
         enableServerLogs: false,
+        logger: (m) => {
+          const s = skippedTool(m)
+          if (s) skipped[s.tool] = s.code
+        },
       },
     },
   })
   type Tools = Awaited<ReturnType<MCPClient['listToolsetsWithErrors']>>['toolsets'][string]
   // Listed once and kept; listed again after any failure. A node that refused the token or could
   // not be reached is named as such, not as a missing tool.
-  let tools: Promise<Tools> | null = null
-  const list = async (): Promise<Tools> => {
+  let tools: Promise<{ tools: Tools; skipped: Record<string, string> }> | null = null
+  const list = async () => {
+    skipped = {}
     const { toolsets, errors, errorDetails } = await mcp.listToolsetsWithErrors()
     const failed = errorDetails.hdtp
     if (failed || errors.hdtp !== undefined) {
       throw new NodeRefusal('connect', failed?.httpStatus === 401 ? 'owner_token_refused' : 'node_unreachable')
     }
-    return toolsets.hdtp ?? {}
+    return { tools: toolsets.hdtp ?? {}, skipped }
   }
-  const call: CallTool = async (name, args, signal) => {
+  const listed = () => {
+    const p = (tools ??= list())
+    p.catch(() => (tools = null))
+    return p
+  }
+  const offered = async (name: string) => {
     try {
-      const set = await (tools ??= list())
-      const tool = set[name]
+      const tool = (await listed()).tools[name]
       if (!tool?.execute) throw new NodeRefusal(name, 'tool_not_offered')
-      // Called by code, outside any agent run: the MCP tool reads only the context's optional members,
-      // and hands abortSignal to the request, so stopping a held wait ends it.
-      return (await tool.execute(args, { abortSignal: signal } as ToolExecutionContext)) as ToolAnswer
+      return tool
     } catch (e) {
       tools = null
       throw e instanceof NodeRefusal ? e : new NodeRefusal(name, 'node_unreachable')
     }
   }
-  return { node: nodeClientOver(call), disconnect: () => mcp.disconnect() }
+  const catalog: Catalog = {
+    async toolSchema(name) {
+      const tool = await offered(name)
+      // The client keeps the listed JSON Schema behind a standard schema; this reads it back.
+      return standardSchemaToJSONSchema(tool.inputSchema as Parameters<typeof standardSchemaToJSONSchema>[0]) as JsonSchema
+    },
+    async listTools() {
+      const { tools, skipped } = await listed()
+      return { offered: Object.keys(tools).filter((n) => tools[n]?.execute), skipped: { ...skipped } }
+    },
+  }
+  const call: CallTool = async (name, args, signal) => {
+    const tool = await offered(name)
+    try {
+      // Called by code, outside any agent run: the MCP tool reads only the context's optional members,
+      // and hands abortSignal to the request, so stopping a held wait ends it.
+      return (await tool.execute!(args, { abortSignal: signal } as ToolExecutionContext)) as ToolAnswer
+    } catch (e) {
+      tools = null
+      throw e instanceof NodeRefusal ? e : new NodeRefusal(name, 'node_unreachable')
+    }
+  }
+  return { node: nodeClientOver(call, catalog), disconnect: () => mcp.disconnect() }
 }

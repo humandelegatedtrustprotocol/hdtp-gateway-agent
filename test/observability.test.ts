@@ -16,7 +16,7 @@ import { FIRST_START_FILE } from '../src/hdtp/first-start.ts'
 import { receive } from '../src/hdtp/runtime.ts'
 import { SIGNATURE_HEADER } from '../src/hdtp/signature.ts'
 import { KEEP_MS, sweep } from '../src/mastra/retention.ts'
-import { FakeNode, envelope, sign } from './fakes.ts'
+import { FakeNode, envelope, reply, sign } from './fakes.ts'
 import { TOKEN, serve } from './wire.ts'
 
 const WEBHOOK_SECRET = 'whsec_observability-test'
@@ -94,11 +94,14 @@ describe("the entry file's Mastra instance", () => {
     // After the variables: the entry file reads its settings as it loads. The delegate first, given
     // a mock model, so the runtime the entry file starts drafts with it.
     const { delegate } = await import('../src/mastra/agents/delegate.ts')
-    delegate.__updateModel({ model: createMockModel({ mockText: 'Wednesday at three works.', version: 'v2' }) })
+    delegate.__updateModel({ model: createMockModel({ mockText: reply('Wednesday at three works.'), version: 'v2' }) })
     ;({ mastra } = await import('../src/mastra/index.ts'))
-    // The start: the sweep's pass, and the wait loop's first pass, done.
+    // The start: the sweep's pass, and the wait loop's first pass, ended. A pass still running when
+    // the hit below arrives would take the hit's thread over, and its draft with it.
     await until(async () => (await rootsOf('first_start')).length > 0 && node.waits.length >= 2)
-    await until(async () => (await (await store()).listTraces({})).spans.some((t) => t.name === 'watch_pass'))
+    const ended = async (name: string) =>
+      (await (await store()).listTraces({})).spans.some((t) => t.name === name && t.endedAt)
+    await until(async () => (await ended('reconcile')) && (await ended('watch_pass')))
   })
   afterAll(async () => {
     vi.restoreAllMocks()

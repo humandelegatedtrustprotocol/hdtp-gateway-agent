@@ -2,46 +2,46 @@
   {
     "name": "list_accounts",
     "inputSchema": {
-      "type": "object",
-      "additionalProperties": false
+      "additionalProperties": false,
+      "type": "object"
     }
   },
   {
     "name": "get_inbox",
     "inputSchema": {
-      "type": "object",
+      "additionalProperties": false,
       "properties": {
         "account_id": {
-          "type": "string",
-          "description": "the account to act on"
+          "description": "the account to act on",
+          "type": "string"
         }
       },
       "required": [
         "account_id"
       ],
-      "additionalProperties": false
+      "type": "object"
     }
   },
   {
     "name": "list_contacts",
     "inputSchema": {
-      "type": "object",
+      "additionalProperties": false,
       "properties": {
         "account_id": {
-          "type": "string",
-          "description": "the account to act on"
+          "description": "the account to act on",
+          "type": "string"
         }
       },
       "required": [
         "account_id"
       ],
-      "additionalProperties": false
+      "type": "object"
     }
   },
   {
     "name": "read_thread",
     "inputSchema": {
-      "type": "object",
+      "additionalProperties": false,
       "properties": {
         "account_id": {
           "type": "string"
@@ -54,21 +54,18 @@
         "account_id",
         "thread_id"
       ],
-      "additionalProperties": false
+      "type": "object"
     }
   },
   {
     "name": "send_to_contact",
     "inputSchema": {
-      "type": "object",
+      "additionalProperties": false,
       "properties": {
         "account_id": {
           "type": "string"
         },
         "contact_fpr": {
-          "type": "string"
-        },
-        "thread_id": {
           "type": "string"
         },
         "msg_id": {
@@ -77,9 +74,13 @@
         "text": {
           "type": "string"
         },
+        "thread_id": {
+          "description": "the thread to continue, as get_inbox lists it or a send answered it (ThreadID); none starts a new thread",
+          "type": "string"
+        },
         "topic": {
-          "type": "string",
-          "description": "a new thread's topic, at most 256 bytes; refused for a thread that exists"
+          "description": "a new thread's topic, at most 256 bytes; refused for a thread that exists",
+          "type": "string"
         }
       },
       "required": [
@@ -88,41 +89,41 @@
         "msg_id",
         "text"
       ],
-      "additionalProperties": false
+      "type": "object"
     }
   },
   {
     "name": "list_pending",
     "inputSchema": {
-      "type": "object",
+      "additionalProperties": false,
       "properties": {
         "account_id": {
-          "type": "string",
-          "description": "the account to act on"
+          "description": "the account to act on",
+          "type": "string"
         }
       },
       "required": [
         "account_id"
       ],
-      "additionalProperties": false
+      "type": "object"
     }
   },
   {
     "name": "answer_request",
     "inputSchema": {
-      "type": "object",
+      "additionalProperties": false,
       "properties": {
         "account_id": {
-          "type": "string",
-          "description": "the account the request belongs to"
+          "description": "the account the request belongs to",
+          "type": "string"
         },
         "request_id": {
-          "type": "string",
-          "description": "the pending request id"
+          "description": "the pending request id",
+          "type": "string"
         },
         "result": {
-          "type": "string",
-          "description": "the answer payload relayed to the caller"
+          "description": "the answer payload relayed to the caller",
+          "type": "string"
         }
       },
       "required": [
@@ -130,36 +131,1041 @@
         "request_id",
         "result"
       ],
-      "additionalProperties": false
+      "type": "object"
     }
   },
   {
     "name": "wait_for_updates",
     "inputSchema": {
-      "type": "object",
+      "additionalProperties": false,
       "properties": {
         "account_id": {
           "type": "string"
         },
         "since": {
+          "description": "cursor from a previous wait_for_updates; omit to start from now",
           "type": [
             "null",
             "integer"
-          ],
-          "description": "cursor from a previous wait_for_updates; omit to start from now"
+          ]
         },
         "timeout_sec": {
+          "description": "seconds to wait for something to happen, from 1 to 25; 25 when omitted",
           "type": [
             "null",
             "integer"
-          ],
-          "description": "seconds to wait for something to happen, from 1 to 25; 25 when omitted"
+          ]
         }
       },
       "required": [
         "account_id"
       ],
-      "additionalProperties": false
+      "type": "object"
+    }
+  },
+  {
+    "name": "ask_owner",
+    "inputSchema": {
+      "$defs": {
+        "Button": {
+          "additionalProperties": false,
+          "description": "A button whose label is a Text (child). Pressing it answers the ask. A ready reply is a Button whose event is \"reply\" and whose context is {reply: the reply's text}: one tap sends that text to the contact as the owner's own message. Any other Button answers with its context, each {path} read from the data model.",
+          "properties": {
+            "action": {
+              "additionalProperties": false,
+              "properties": {
+                "event": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": false,
+                      "description": "A ready reply: one tap sends context.reply to the contact as the owner's own message.",
+                      "properties": {
+                        "context": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "reply": {
+                              "maxLength": 280,
+                              "minLength": 1,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "reply"
+                          ],
+                          "type": "object"
+                        },
+                        "name": {
+                          "const": "reply",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "context"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "context": {
+                          "additionalProperties": {
+                            "anyOf": [
+                              {
+                                "maxLength": 280,
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "$ref": "#/$defs/DataBinding"
+                              }
+                            ]
+                          },
+                          "maxProperties": 8,
+                          "type": "object"
+                        },
+                        "name": {
+                          "maxLength": 64,
+                          "minLength": 1,
+                          "not": {
+                            "const": "reply"
+                          },
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "name"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "event"
+              ],
+              "type": "object"
+            },
+            "child": {
+              "$ref": "#/$defs/ComponentId"
+            },
+            "component": {
+              "const": "Button",
+              "type": "string"
+            },
+            "id": {
+              "$ref": "#/$defs/ComponentId"
+            },
+            "variant": {
+              "enum": [
+                "default",
+                "primary",
+                "borderless"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "component",
+            "child",
+            "action"
+          ],
+          "type": "object"
+        },
+        "ChildList": {
+          "items": {
+            "$ref": "#/$defs/ComponentId"
+          },
+          "maxItems": 19,
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "ChoicePicker": {
+          "additionalProperties": false,
+          "description": "Options the owner picks one of: its value is written at the bound path, and a Button whose context reads that path sends the picked option's label to the contact as the owner's own message. Ready replies are reply Buttons instead: one tap each.",
+          "properties": {
+            "component": {
+              "const": "ChoicePicker",
+              "type": "string"
+            },
+            "id": {
+              "$ref": "#/$defs/ComponentId"
+            },
+            "label": {
+              "description": "What the choice is about.",
+              "maxLength": 280,
+              "minLength": 1,
+              "type": "string"
+            },
+            "options": {
+              "description": "Each option's label is the reply itself, as it is sent; its value is what the data model holds when it is chosen.",
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "label": {
+                    "maxLength": 280,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "value": {
+                    "maxLength": 280,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "label",
+                  "value"
+                ],
+                "type": "object"
+              },
+              "maxItems": 3,
+              "minItems": 1,
+              "type": "array"
+            },
+            "value": {
+              "$ref": "#/$defs/DataBinding"
+            },
+            "variant": {
+              "enum": [
+                "mutuallyExclusive"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "component",
+            "options",
+            "value"
+          ],
+          "type": "object"
+        },
+        "Column": {
+          "additionalProperties": false,
+          "description": "The root, and only the root (id \"root\"), first in the list: its children, top to bottom. The first is a Text, the TLDR, second in the list.",
+          "properties": {
+            "children": {
+              "$ref": "#/$defs/ChildList"
+            },
+            "component": {
+              "const": "Column",
+              "type": "string"
+            },
+            "id": {
+              "const": "root",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "component",
+            "children"
+          ],
+          "type": "object"
+        },
+        "ComponentId": {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        },
+        "DataBinding": {
+          "additionalProperties": false,
+          "description": "A path in the surface's data model: an absolute JSON Pointer.",
+          "properties": {
+            "path": {
+              "maxLength": 64,
+              "minLength": 2,
+              "pattern": "^/",
+              "type": "string"
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "type": "object"
+        },
+        "DateTimeInput": {
+          "additionalProperties": false,
+          "description": "A date, a time or both, picked by the owner and written at the bound path; a Button that sends it answers the ask and sends nothing to the contact.",
+          "properties": {
+            "component": {
+              "const": "DateTimeInput",
+              "type": "string"
+            },
+            "enableDate": {
+              "type": "boolean"
+            },
+            "enableTime": {
+              "type": "boolean"
+            },
+            "id": {
+              "$ref": "#/$defs/ComponentId"
+            },
+            "label": {
+              "maxLength": 280,
+              "minLength": 1,
+              "type": "string"
+            },
+            "max": {
+              "description": "ISO 8601.",
+              "maxLength": 40,
+              "minLength": 1,
+              "type": "string"
+            },
+            "min": {
+              "description": "ISO 8601.",
+              "maxLength": 40,
+              "minLength": 1,
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/DataBinding"
+            }
+          },
+          "required": [
+            "id",
+            "component",
+            "value"
+          ],
+          "type": "object"
+        },
+        "KeyValue": {
+          "additionalProperties": false,
+          "description": "The node's own component: the key terms, one label and value per item.",
+          "properties": {
+            "component": {
+              "const": "KeyValue",
+              "type": "string"
+            },
+            "id": {
+              "$ref": "#/$defs/ComponentId"
+            },
+            "items": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "label": {
+                    "maxLength": 64,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "value": {
+                    "maxLength": 280,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "label",
+                  "value"
+                ],
+                "type": "object"
+              },
+              "maxItems": 8,
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [
+            "id",
+            "component",
+            "items"
+          ],
+          "type": "object"
+        },
+        "Text": {
+          "additionalProperties": false,
+          "description": "A line of text. The first child of root is the TLDR: what the owner needs to know, in at most 280 bytes.",
+          "properties": {
+            "component": {
+              "const": "Text",
+              "type": "string"
+            },
+            "id": {
+              "$ref": "#/$defs/ComponentId"
+            },
+            "text": {
+              "description": "Literal text.",
+              "maxLength": 2000,
+              "minLength": 1,
+              "type": "string"
+            },
+            "variant": {
+              "enum": [
+                "h1",
+                "h2",
+                "h3",
+                "h4",
+                "h5",
+                "caption",
+                "body"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "component",
+            "text"
+          ],
+          "type": "object"
+        },
+        "TextField": {
+          "additionalProperties": false,
+          "description": "Write my own: what the owner types is written at the bound path. Every ask has one, root's next-to-last child, and root's last child is the Button that sends it: its context reads this path, and what the owner wrote is sent to the contact as their own message.",
+          "properties": {
+            "component": {
+              "const": "TextField",
+              "type": "string"
+            },
+            "id": {
+              "$ref": "#/$defs/ComponentId"
+            },
+            "label": {
+              "maxLength": 280,
+              "minLength": 1,
+              "type": "string"
+            },
+            "value": {
+              "$ref": "#/$defs/DataBinding"
+            },
+            "variant": {
+              "enum": [
+                "shortText",
+                "longText"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "component",
+            "label",
+            "value"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "description": "the account to act on",
+          "minLength": 1,
+          "type": "string"
+        },
+        "for_message_id": {
+          "description": "the message in the thread it is about, as read_thread names it; asking twice about one message is one ask",
+          "minLength": 1,
+          "type": "string"
+        },
+        "surface": {
+          "description": "An A2UI v0.9.1 surface: a createSurface message naming catalogId https://hdtp.dev/a2ui/v0_9_1/catalogs/owner/catalog.json, then an updateComponents message for the same surfaceId. Its components list the root first, a Column of id \"root\", then the TLDR, the Text that is root's first child. Optionally a third, updateDataModel for the same surfaceId: the values the inputs start from. The owner answers by pressing a Button. Each ready reply is a Button of event \"reply\" with context {reply: its text}, sent in one tap; every input binds its value to a {path}, and the Button that sends it names those paths in its context. Every ask ends with the owner's own message: root's last two children are a TextField, then the Button that sends it, whose context reads the TextField's path.",
+          "maxItems": 3,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "createSurface": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "catalogId": {
+                      "const": "https://hdtp.dev/a2ui/v0_9_1/catalogs/owner/catalog.json",
+                      "type": "string"
+                    },
+                    "surfaceId": {
+                      "maxLength": 64,
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "surfaceId",
+                    "catalogId"
+                  ],
+                  "type": "object"
+                },
+                "version": {
+                  "const": "v0.9.1",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "version",
+                "createSurface"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "updateComponents": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "components": {
+                      "allOf": [
+                        {
+                          "contains": {
+                            "properties": {
+                              "component": {
+                                "const": "Column"
+                              }
+                            },
+                            "required": [
+                              "component"
+                            ],
+                            "type": "object"
+                          },
+                          "maxContains": 1,
+                          "minContains": 0
+                        },
+                        {
+                          "contains": {
+                            "properties": {
+                              "component": {
+                                "const": "ChoicePicker"
+                              }
+                            },
+                            "required": [
+                              "component"
+                            ],
+                            "type": "object"
+                          },
+                          "maxContains": 1,
+                          "minContains": 0
+                        },
+                        {
+                          "contains": {
+                            "properties": {
+                              "action": {
+                                "properties": {
+                                  "event": {
+                                    "properties": {
+                                      "name": {
+                                        "const": "reply"
+                                      }
+                                    },
+                                    "required": [
+                                      "name"
+                                    ],
+                                    "type": "object"
+                                  }
+                                },
+                                "required": [
+                                  "event"
+                                ],
+                                "type": "object"
+                              },
+                              "component": {
+                                "const": "Button"
+                              }
+                            },
+                            "required": [
+                              "component",
+                              "action"
+                            ],
+                            "type": "object"
+                          },
+                          "maxContains": 3,
+                          "minContains": 0
+                        },
+                        {
+                          "contains": {
+                            "properties": {
+                              "component": {
+                                "const": "TextField"
+                              }
+                            },
+                            "required": [
+                              "component"
+                            ],
+                            "type": "object"
+                          },
+                          "maxContains": 1,
+                          "minContains": 1
+                        },
+                        {
+                          "contains": {
+                            "properties": {
+                              "action": {
+                                "properties": {
+                                  "event": {
+                                    "properties": {
+                                      "name": {
+                                        "not": {
+                                          "const": "reply"
+                                        }
+                                      }
+                                    },
+                                    "required": [
+                                      "name"
+                                    ],
+                                    "type": "object"
+                                  }
+                                },
+                                "required": [
+                                  "event"
+                                ],
+                                "type": "object"
+                              },
+                              "component": {
+                                "const": "Button"
+                              }
+                            },
+                            "required": [
+                              "component",
+                              "action"
+                            ],
+                            "type": "object"
+                          }
+                        }
+                      ],
+                      "items": {
+                        "anyOf": [
+                          {
+                            "$ref": "#/$defs/Column"
+                          },
+                          {
+                            "$ref": "#/$defs/Text"
+                          },
+                          {
+                            "$ref": "#/$defs/KeyValue"
+                          },
+                          {
+                            "$ref": "#/$defs/ChoicePicker"
+                          },
+                          {
+                            "$ref": "#/$defs/TextField"
+                          },
+                          {
+                            "$ref": "#/$defs/DateTimeInput"
+                          },
+                          {
+                            "$ref": "#/$defs/Button"
+                          }
+                        ]
+                      },
+                      "maxItems": 20,
+                      "minItems": 2,
+                      "prefixItems": [
+                        {
+                          "$ref": "#/$defs/Column"
+                        },
+                        {
+                          "$ref": "#/$defs/Text"
+                        }
+                      ],
+                      "type": "array"
+                    },
+                    "surfaceId": {
+                      "maxLength": 64,
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "surfaceId",
+                    "components"
+                  ],
+                  "type": "object"
+                },
+                "version": {
+                  "const": "v0.9.1",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "version",
+                "updateComponents"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "updateDataModel": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "const": "/",
+                      "description": "The whole data model; omit it or give \"/\".",
+                      "type": "string"
+                    },
+                    "surfaceId": {
+                      "maxLength": 64,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "value": {
+                      "description": "The data model the inputs start from, by their paths.",
+                      "type": "object"
+                    }
+                  },
+                  "required": [
+                    "surfaceId",
+                    "value"
+                  ],
+                  "type": "object"
+                },
+                "version": {
+                  "const": "v0.9.1",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "version",
+                "updateDataModel"
+              ],
+              "type": "object"
+            }
+          ],
+          "type": "array"
+        },
+        "thread_id": {
+          "description": "the thread the surface goes on, as get_inbox names it",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "account_id",
+        "thread_id",
+        "for_message_id",
+        "surface"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "notify_owner",
+    "inputSchema": {
+      "$defs": {
+        "ChildList": {
+          "items": {
+            "$ref": "#/$defs/ComponentId"
+          },
+          "maxItems": 19,
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        },
+        "Column": {
+          "additionalProperties": false,
+          "description": "The root, and only the root (id \"root\"), first in the list: its children, top to bottom. The first is a Text, the TLDR, second in the list.",
+          "properties": {
+            "children": {
+              "$ref": "#/$defs/ChildList"
+            },
+            "component": {
+              "const": "Column",
+              "type": "string"
+            },
+            "id": {
+              "const": "root",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "component",
+            "children"
+          ],
+          "type": "object"
+        },
+        "ComponentId": {
+          "maxLength": 64,
+          "minLength": 1,
+          "type": "string"
+        },
+        "DataBinding": {
+          "additionalProperties": false,
+          "description": "A path in the surface's data model: an absolute JSON Pointer.",
+          "properties": {
+            "path": {
+              "maxLength": 64,
+              "minLength": 2,
+              "pattern": "^/",
+              "type": "string"
+            }
+          },
+          "required": [
+            "path"
+          ],
+          "type": "object"
+        },
+        "KeyValue": {
+          "additionalProperties": false,
+          "description": "The node's own component: the key terms, one label and value per item.",
+          "properties": {
+            "component": {
+              "const": "KeyValue",
+              "type": "string"
+            },
+            "id": {
+              "$ref": "#/$defs/ComponentId"
+            },
+            "items": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "label": {
+                    "maxLength": 64,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "value": {
+                    "maxLength": 280,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "label",
+                  "value"
+                ],
+                "type": "object"
+              },
+              "maxItems": 8,
+              "minItems": 1,
+              "type": "array"
+            }
+          },
+          "required": [
+            "id",
+            "component",
+            "items"
+          ],
+          "type": "object"
+        },
+        "Text": {
+          "additionalProperties": false,
+          "description": "A line of text. The first child of root is the TLDR: what the owner needs to know, in at most 280 bytes.",
+          "properties": {
+            "component": {
+              "const": "Text",
+              "type": "string"
+            },
+            "id": {
+              "$ref": "#/$defs/ComponentId"
+            },
+            "text": {
+              "description": "Literal text.",
+              "maxLength": 2000,
+              "minLength": 1,
+              "type": "string"
+            },
+            "variant": {
+              "enum": [
+                "h1",
+                "h2",
+                "h3",
+                "h4",
+                "h5",
+                "caption",
+                "body"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "component",
+            "text"
+          ],
+          "type": "object"
+        }
+      },
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "description": "the account to act on",
+          "minLength": 1,
+          "type": "string"
+        },
+        "for_message_id": {
+          "description": "the message in the thread it is about, as read_thread names it; asking twice about one message is one notice",
+          "minLength": 1,
+          "type": "string"
+        },
+        "surface": {
+          "description": "An A2UI v0.9.1 surface: a createSurface message naming catalogId https://hdtp.dev/a2ui/v0_9_1/catalogs/owner/catalog.json, then an updateComponents message for the same surfaceId. Its components list the root first, a Column of id \"root\", then the TLDR, the Text that is root's first child. A notice holds only Text and KeyValue: it tells, and nothing answers it.",
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "createSurface": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "catalogId": {
+                      "const": "https://hdtp.dev/a2ui/v0_9_1/catalogs/owner/catalog.json",
+                      "type": "string"
+                    },
+                    "surfaceId": {
+                      "maxLength": 64,
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "surfaceId",
+                    "catalogId"
+                  ],
+                  "type": "object"
+                },
+                "version": {
+                  "const": "v0.9.1",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "version",
+                "createSurface"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "updateComponents": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "components": {
+                      "allOf": [
+                        {
+                          "contains": {
+                            "properties": {
+                              "component": {
+                                "const": "Column"
+                              }
+                            },
+                            "required": [
+                              "component"
+                            ],
+                            "type": "object"
+                          },
+                          "maxContains": 1,
+                          "minContains": 0
+                        }
+                      ],
+                      "items": {
+                        "anyOf": [
+                          {
+                            "$ref": "#/$defs/Column"
+                          },
+                          {
+                            "$ref": "#/$defs/Text"
+                          },
+                          {
+                            "$ref": "#/$defs/KeyValue"
+                          }
+                        ]
+                      },
+                      "maxItems": 20,
+                      "minItems": 2,
+                      "prefixItems": [
+                        {
+                          "$ref": "#/$defs/Column"
+                        },
+                        {
+                          "$ref": "#/$defs/Text"
+                        }
+                      ],
+                      "type": "array"
+                    },
+                    "surfaceId": {
+                      "maxLength": 64,
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "surfaceId",
+                    "components"
+                  ],
+                  "type": "object"
+                },
+                "version": {
+                  "const": "v0.9.1",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "version",
+                "updateComponents"
+              ],
+              "type": "object"
+            }
+          ],
+          "type": "array"
+        },
+        "thread_id": {
+          "description": "the thread the surface goes on, as get_inbox names it",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "account_id",
+        "thread_id",
+        "for_message_id",
+        "surface"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "list_asks",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "type": "string"
+        },
+        "contact_fpr": {
+          "description": "one contact's asks and notices, newest first",
+          "type": "string"
+        },
+        "status": {
+          "description": "open for the asks waiting on the owner; omit for every ask and notice",
+          "type": "string"
+        },
+        "thread_id": {
+          "description": "one thread's asks and notices, newest first",
+          "type": "string"
+        }
+      },
+      "required": [
+        "account_id"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "export_card",
+    "inputSchema": {
+      "additionalProperties": false,
+      "properties": {
+        "account_id": {
+          "description": "the account to act on",
+          "type": "string"
+        }
+      },
+      "required": [
+        "account_id"
+      ],
+      "type": "object"
     }
   }
 ]

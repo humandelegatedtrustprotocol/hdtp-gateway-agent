@@ -11,18 +11,53 @@
 // sweep has listed them, a failed sweep is tried again after the watcher's backoff rather than at
 // the next interval, so the loops, and the agent's presence on the node, start as soon as the node
 // answers.
+//
+// Before the first sweep reads anything, the node's tool list is held to every tool the agent calls
+// (TOOLS_CALLED). A node that does not offer one, or offers one the MCP client skipped, is refused at
+// start: tools_missing names them, with the reason for each one skipped, and the agent stays idle.
+//
+// Each draft is one model call capped at MAX_OUTPUT_TOKENS. A model can write a whole turn and then
+// pad it with whitespace up to the provider's own limit, for minutes; the cap is what bounds a
+// turn's time and cost. A call that stops at the cap (finish reason "length") is refused as
+// draft:truncated, a failed attempt like any malformed turn, and is not read even when its text
+// parses.
 
 import type { Agent } from '@mastra/core/agent'
 import { getCurrentSpan } from '@mastra/core/observability/context-storage'
 import type { Config } from './config.ts'
-import { consoleLog, untraced, type Log, type Trace } from './log.ts'
+import { consoleLog, untraced, type Fields, type Log, type Trace } from './log.ts'
 import { FirstStartUnreadable, firstStart } from './first-start.ts'
-import { connectNode, refusalCode } from './node.ts'
-import { Responder } from './responder.ts'
+import { NodeRefusal, TOOLS_CALLED, connectNode, refusalCode, type NodeClient } from './node.ts'
+import { Responder, type Draft } from './responder.ts'
 import { Watcher, backoff } from './watch.ts'
 import { createReceiver } from './webhook.ts'
 
 let receiver: ((req: Request) => Promise<Response>) | null = null
+
+/** The most one draft may write, reasoning included. */
+export const MAX_OUTPUT_TOKENS = 4096
+
+/**
+ * One draft: a model call under the cap, refused as draft:truncated when it stops there. The agent
+ * run is kept under the span the draft is made in, as one trace with it.
+ */
+export function drafter(agent: Pick<Agent, 'generate'>): Draft {
+  return async (prompt) => {
+    const out = await agent.generate(prompt, {
+      modelSettings: { maxOutputTokens: MAX_OUTPUT_TOKENS },
+      tracingContext: { currentSpan: getCurrentSpan() },
+    })
+    if (out.finishReason === 'length') throw new NodeRefusal('draft', 'truncated')
+    return out.text
+  }
+}
+
+/** The tools this agent calls that the node does not offer, and why each skipped one was skipped. */
+export async function missingTools(node: NodeClient): Promise<{ tools: string[]; skipped: string[] }> {
+  const { offered, skipped } = await node.listTools()
+  const tools = TOOLS_CALLED.filter((t) => !offered.includes(t))
+  return { tools, skipped: tools.filter((t) => skipped[t]).map((t) => `${t}:${skipped[t]}`) }
+}
 
 /** POST /hdtp/webhook: the started runtime's receiver, or 503 in a process that has not started one. */
 export function receive(req: Request): Promise<Response> {
@@ -57,27 +92,36 @@ export function startRuntime(config: Config, agent: Agent, log: Log = consoleLog
     log.warn(idleWhy)
   } else {
     const { node } = connectNode(config.ownerMcpUrl, token)
-    // The agent run is kept under the span the draft is made in, as one trace with it.
-    const draft = async (prompt: string) =>
-      (await agent.generate(prompt, { tracingContext: { currentSpan: getCurrentSpan() } })).text
-    const r = new Responder(node, draft, log, {
+    const r = new Responder(node, drafter(agent), log, {
       answer: config.answer,
       turnCap: config.agentTurnCap,
       repliesPerHour: config.repliesPerHour,
       firstStart: since,
       now,
     })
-    responder = r
     const watcher = new Watcher(node, (accountId) => trace('watch_pass', () => r.reconcileAccount(accountId)), log)
     let sweeping = false
     let failures = 0
     let retry: ReturnType<typeof setTimeout> | undefined
+    idleWhy = 'tools_unchecked'
     const sweep = async () => {
       if (sweeping) return
       sweeping = true
       try {
         await trace('reconcile', async () => {
           try {
+            if (!responder) {
+              const missing = await missingTools(node)
+              if (missing.tools.length > 0) {
+                idleWhy = 'tools_missing'
+                const fields: Fields = { tools: missing.tools.join(',') }
+                if (missing.skipped.length > 0) fields.skipped = missing.skipped.join(',')
+                log.warn('tools_missing', fields)
+                stop()
+                return
+              }
+              responder = r
+            }
             await r.reconcile((accounts) => watcher.sync(accounts))
             failures = 0
           } catch (e) {
