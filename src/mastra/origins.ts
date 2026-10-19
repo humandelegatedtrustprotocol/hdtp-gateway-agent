@@ -17,8 +17,10 @@
 // Mastra runs no middleware on routes declared public, so neither rule reaches them:
 // - /hdtp/webhook, whose signature is checked, so the node may name any host (http://agent:4111
 //   inside a compose project, say);
-// - Mastra's sign-in routes, which refuse every request without an auth provider (404 "not
-//   configured", 400 for a malformed body; this agent has no provider);
+// - Mastra's auth routes, which do nothing without an auth provider (this agent has none): POST
+//   /api/auth/credentials/sign-in and /sign-up answer 400 to a malformed body and otherwise 404
+//   "Credentials authentication not configured"; POST /api/auth/logout and /api/auth/refresh
+//   answer 404 "Logout not configured" and "Session refresh not configured" (Mastra 1.78.0);
 // - under `mastra dev`, Studio's /refresh-events and /__hot-reload-status, which answer a
 //   "connected" event and the hot-reload flag, nothing of the agent's.
 
