@@ -18,6 +18,9 @@ export const mastra = new Mastra({
   agents: { delegate },
   server: {
     host: '127.0.0.1',
+    // Studio's two addresses only, not Mastra's default `*`: a page of any other origin is given no
+    // Access-Control-Allow-Origin, so the browser keeps the answer from it.
+    cors: { origin: ['http://localhost:4111', 'http://127.0.0.1:4111'] },
     apiRoutes: [
       registerApiRoute('/hdtp/webhook', {
         method: 'POST',
