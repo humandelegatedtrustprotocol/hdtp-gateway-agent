@@ -197,6 +197,8 @@ interface ToolAnswer {
 
 type CallTool = (name: string, args: Record<string, unknown>, signal?: AbortSignal) => Promise<ToolAnswer>
 
+const nonEmpty = (v: unknown): boolean => typeof v === 'string' && v !== ''
+
 /** The JSON a tool answered with, or a NodeRefusal for a tool error. */
 export function decodeAnswer(tool: string, answer: ToolAnswer): unknown {
   const text = answer.content?.find((c) => c.type === 'text')?.text
@@ -207,8 +209,11 @@ export function decodeAnswer(tool: string, answer: ToolAnswer): unknown {
     throw new NodeRefusal(tool, 'unreadable_answer')
   }
   if (answer.isError) {
-    const v = value as { code?: unknown; reason?: unknown; ThreadID?: unknown } | null
-    const recorded = typeof v?.ThreadID === 'string' && v.ThreadID !== ''
+    const v = value as { code?: unknown; reason?: unknown; message_id?: unknown; thread_id?: unknown } | null
+    // send_to_contact's refusal for a message recorded and not delivered carries the send's answer
+    // beside its code: {code, detail, status, message_id, thread_id}. The node answers it so only
+    // when the message is on a thread.
+    const recorded = tool === 'send_to_contact' && nonEmpty(v?.message_id) && nonEmpty(v?.thread_id)
     throw new NodeRefusal(tool, typeof v?.code === 'string' ? v.code : 'tool_error', recorded, reasonOf(v?.reason))
   }
   return value
@@ -241,8 +246,8 @@ export function nodeClientOver(call: CallTool, catalog: Catalog): NodeClient {
       try {
         await json('send_to_contact', { ...args })
       } catch (e) {
-        // Recorded and not yet delivered (the error carries ThreadID and Status pending): the node
-        // goes on delivering it under this msg_id, so the reply exists.
+        // Recorded and not yet delivered (the error carries message_id and thread_id): the node goes
+        // on delivering it under this msg_id, so the reply exists.
         if (e instanceof NodeRefusal && e.recorded) return
         throw e
       }

@@ -75,7 +75,7 @@
           "type": "string"
         },
         "thread_id": {
-          "description": "the thread to continue, as get_inbox lists it or a send answered it (ThreadID); none starts a new thread",
+          "description": "the thread to continue, as get_inbox lists it or a send answered it (thread_id); none starts a new thread",
           "type": "string"
         },
         "topic": {
