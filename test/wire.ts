@@ -12,7 +12,8 @@ import { readFileSync } from 'node:fs'
 import type { FakeNode } from './fakes.ts'
 
 export const TOKEN = 'hdtp_test-token'
-const tools = JSON.parse(readFileSync(new URL('./owner-mcp-tools.json', import.meta.url), 'utf8')) as Array<{ name: string }>
+export type ListedTool = { name: string; inputSchema: Record<string, unknown> }
+export const LISTED = JSON.parse(readFileSync(new URL('./owner-mcp-tools.json', import.meta.url), 'utf8')) as ListedTool[]
 
 async function bodyOf(req: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = []
@@ -20,7 +21,8 @@ async function bodyOf(req: IncomingMessage): Promise<string> {
   return Buffer.concat(chunks).toString('utf8')
 }
 
-export function serve(node: FakeNode, port = 0): Promise<{ server: Server; url: string; unauthorized: () => number }> {
+/** Serves `tools` as the tools/list answer: the captured list unless a test changes it. */
+export function serve(node: FakeNode, port = 0, tools: ListedTool[] = LISTED): Promise<{ server: Server; url: string; unauthorized: () => number }> {
   let unauthorized = 0
   const server = createServer(async (req, res) => {
     if (req.headers.authorization !== `Bearer ${TOKEN}`) {
@@ -75,4 +77,23 @@ export function closedPort(): Promise<number> {
       s.close(() => resolve(port))
     })
   })
+}
+
+/** An input schema of `n` string properties: past 10000 nodes, @mastra/mcp skips the tool. */
+export function wideSchema(n: number): Record<string, unknown> {
+  const properties: Record<string, unknown> = {}
+  for (let i = 0; i < n; i++) properties[`p${i}`] = { type: 'string' }
+  return { type: 'object', properties }
+}
+
+/** An input schema nested `depth` objects deep: past 128, @mastra/mcp skips the tool. */
+export function deepSchema(depth: number): Record<string, unknown> {
+  let schema: Record<string, unknown> = { type: 'string' }
+  for (let i = 0; i < depth; i++) schema = { type: 'object', properties: { next: schema } }
+  return schema
+}
+
+/** The captured list with one tool's input schema replaced. */
+export function listedWith(name: string, inputSchema: Record<string, unknown>): ListedTool[] {
+  return LISTED.map((t) => (t.name === name ? { ...t, inputSchema } : t))
 }

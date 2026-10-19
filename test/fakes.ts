@@ -4,7 +4,7 @@
 import { createHmac } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import type { Log } from '../src/hdtp/log.ts'
-import { NodeRefusal, type JsonSchema, type OwnerAsk, type PendingRequest, type ThreadMessage } from '../src/hdtp/node.ts'
+import { NodeRefusal, type Catalog, type JsonSchema, type OwnerAsk, type PendingRequest, type ThreadMessage, type ToolListing } from '../src/hdtp/node.ts'
 import type { Rules } from '../src/hdtp/responder.ts'
 import { DEFAULT_AGENT_TURN_CAP, DEFAULT_REPLIES_PER_HOUR } from '../src/hdtp/config.ts'
 
@@ -184,6 +184,14 @@ export class FakeNode {
     if (!tool || this.unlisted.has(name)) throw new NodeRefusal(name, 'tool_not_offered')
     return structuredClone(tool.inputSchema)
   }
+
+  /** The node's tools/list as the client takes it: every tool but those unlisted, none skipped. */
+  listTools = async (): Promise<ToolListing> => ({
+    offered: TOOLS.map((t) => t.name).filter((n) => !this.unlisted.has(n)),
+    skipped: {},
+  })
+
+  catalog: Catalog = { toolSchema: (name) => this.toolSchema(name), listTools: () => this.listTools() }
 
   /**
    * The owner answers an ask in the portal: a ready reply or their own words are sent to the

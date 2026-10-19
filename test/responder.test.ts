@@ -10,7 +10,7 @@ function setup(draft?: (prompt: string) => Promise<string>, over: Partial<Rules>
   const prompts: string[] = []
   const log = memoryLog()
   const responder = new Responder(
-    nodeClientOver(node.call, node.toolSchema),
+    nodeClientOver(node.call, node.catalog),
     draft ??
       (async (p) => {
         prompts.push(p)
@@ -62,7 +62,7 @@ describe('one reply per newest inbound message', () => {
     node.inbound('th1', 'hello')
     await responder.onMessage('th1')
     // A restart: a new responder with nothing remembered, reaching the same message by webhook.
-    const again = new Responder(nodeClientOver(node.call, node.toolSchema), async () => reply('second draft'), memoryLog(), rules())
+    const again = new Responder(nodeClientOver(node.call, node.catalog), async () => reply('second draft'), memoryLog(), rules())
     // Its message is no longer the newest, so it does not draft at all...
     await again.onMessage('th1')
     expect(node.sent).toHaveLength(1)
@@ -85,7 +85,7 @@ describe('one reply per newest inbound message', () => {
     const th = node.threads.get('th1')!
     th.messages.shift()
     th.messages.pop()
-    const again = new Responder(nodeClientOver(node.call, node.toolSchema), async () => reply('second draft'), memoryLog(), rules())
+    const again = new Responder(nodeClientOver(node.call, node.catalog), async () => reply('second draft'), memoryLog(), rules())
     await again.onMessage('th1')
     expect(node.calls.filter((c) => c === 'send_to_contact')).toHaveLength(2)
     expect(node.sent).toHaveLength(1)
@@ -169,7 +169,7 @@ describe('a failure after the thread was read', () => {
     node.inbound('th1', 'hello')
     await responder.onMessage('th1')
     expect(node.sent).toEqual([])
-    const inbox = await nodeClientOver(node.call, node.toolSchema).getInbox('acct-1')
+    const inbox = await nodeClientOver(node.call, node.catalog).getInbox('acct-1')
     expect(inbox[0]!.unread).toBe(0)
     fail = false
     await responder.reconcile()
@@ -287,7 +287,7 @@ describe('trusted contacts only, by default', () => {
       { thread_id: 'th-plain' },
     ])
     expect(node.calls.filter((c) => c === 'read_thread')).toHaveLength(1)
-    const inbox = await nodeClientOver(node.call, node.toolSchema).getInbox('acct-1')
+    const inbox = await nodeClientOver(node.call, node.catalog).getInbox('acct-1')
     expect(inbox.filter((t) => t.unread > 0).map((t) => t.thread_id).sort()).toEqual(['th-odd', 'th-plain'])
   })
 
@@ -326,7 +326,7 @@ describe('the start cutoff', () => {
     expect(prompts).toHaveLength(1)
     expect(log.lines.filter((l) => l.code === 'before_first_start').map((l) => l.fields)).toEqual([{ thread_id: 'th-old' }, { thread_id: 'th-old' }])
     // Decided before read_thread: the backlog is still unread for the owner.
-    const inbox = await nodeClientOver(node.call, node.toolSchema).getInbox('acct-1')
+    const inbox = await nodeClientOver(node.call, node.catalog).getInbox('acct-1')
     expect(inbox.find((t) => t.thread_id === 'th-old')!.unread).toBe(1)
     // A new message in that thread is after the first start, and is answered.
     node.inbound('th-old', 'and now')
@@ -348,7 +348,7 @@ describe('the budget of drafts per contact', () => {
     expect(log.lines.filter((l) => l.code === 'contact_budget').map((l) => l.fields)).toEqual([{ thread_id: 'th1' }, { thread_id: 'th1' }])
     // Refused before read_thread: the owner still sees the two messages over the budget unread.
     expect(node.calls.filter((c) => c === 'read_thread')).toHaveLength(3)
-    expect((await nodeClientOver(node.call, node.toolSchema).getInbox('acct-1'))[0]!.unread).toBe(2)
+    expect((await nodeClientOver(node.call, node.catalog).getInbox('acct-1'))[0]!.unread).toBe(2)
   })
 
   it('is one budget for every thread and request of a contact, and another contact has its own', async () => {

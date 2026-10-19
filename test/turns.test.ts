@@ -13,7 +13,7 @@ function setup(draft: Draft, over: Partial<Rules> = {}) {
   const log = memoryLog()
   const prompts: string[] = []
   const responder = new Responder(
-    nodeClientOver(node.call, node.toolSchema),
+    nodeClientOver(node.call, node.catalog),
     async (p) => {
       prompts.push(p)
       return draft(p)
@@ -72,7 +72,7 @@ describe('ask', () => {
     expect(prompts).toHaveLength(1)
     expect(node.sent).toEqual([])
     expect(node.calls.filter((c) => c === 'read_thread')).toHaveLength(1)
-    expect((await nodeClientOver(node.call, node.toolSchema).getInbox('acct-1'))[0]!.unread).toBe(1)
+    expect((await nodeClientOver(node.call, node.catalog).getInbox('acct-1'))[0]!.unread).toBe(1)
     expect(codes(log).filter((c) => c === 'ask_open')).toHaveLength(2)
   })
 
@@ -369,7 +369,7 @@ describe('the turn schema', () => {
     let reads = 0
     let fail = true
     const client: NodeClient = {
-      ...nodeClientOver(node.call, node.toolSchema),
+      ...nodeClientOver(node.call, node.catalog),
       toolSchema: async (name) => {
         reads++
         if (fail) throw new Error('down')

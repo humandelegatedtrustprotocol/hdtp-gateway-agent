@@ -39,7 +39,7 @@ describe('POST /hdtp/webhook', () => {
     node.thread('th1')
     node.inbound('th1', 'hello')
     let drafted = 0
-    const responder = new Responder(nodeClientOver(node.call, node.toolSchema), async () => (drafted++, reply('hi')), memoryLog(), rules())
+    const responder = new Responder(nodeClientOver(node.call, node.catalog), async () => (drafted++, reply('hi')), memoryLog(), rules())
     const tasks: Array<Promise<void>> = []
     const receive = createReceiver({
       secret: () => secret,

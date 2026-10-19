@@ -8,12 +8,14 @@ import type { Agent } from '@mastra/core/agent'
 import { afterAll, describe, expect, it } from 'vitest'
 import { readConfig } from '../src/hdtp/config.ts'
 import { FIRST_START_FILE } from '../src/hdtp/first-start.ts'
-import { startRuntime } from '../src/hdtp/runtime.ts'
-import { FakeNode, memoryLog } from './fakes.ts'
+import { receive, startRuntime } from '../src/hdtp/runtime.ts'
+import { SIGNATURE_HEADER } from '../src/hdtp/signature.ts'
+import { FakeNode, envelope, memoryLog, sign } from './fakes.ts'
 import { TOKEN, serve } from './wire.ts'
 
 describe('a started runtime', () => {
   const node = new FakeNode()
+  const log = memoryLog()
   let close = () => Promise.resolve()
   let stop = () => {}
   afterAll(() => {
@@ -35,12 +37,12 @@ describe('a started runtime', () => {
     }
     let drafts = 0
     const agent = { generate: async () => (drafts++, { text: 'reply' }) } as unknown as Agent
-    const log = memoryLog()
     const config = readConfig({
       HDTP_OWNER_MCP_URL: url,
       HDTP_OWNER_TOKEN: TOKEN,
       HDTP_AGENT_TURN_CAP: '1',
       HDTP_RECONCILE_SECONDS: '3600',
+      HDTP_WEBHOOK_SECRET: 'whsec_x',
       HDTP_AGENT_DATA_DIR: mkdtempSync(join(tmpdir(), 'hdtp-agent-data-')),
     })
     // The fake's messages are from 2025: the first start is set before them, as a file the runtime reads.
@@ -63,5 +65,21 @@ describe('a started runtime', () => {
       { account: 'acct-1', since: undefined },
       { account: 'acct-1', since: expect.any(Number) },
     ])
+  })
+
+  it('hands a webhook to the responder once the node’s tools passed the check', async () => {
+    const before = log.lines.filter((l) => l.code === 'agent_turn_cap').length
+    const body = envelope('evt_start', 'message.received', { thread_id: 'th1' })
+    const t = Math.floor(Date.now() / 1000)
+    const res = await receive(
+      new Request('http://agent/hdtp/webhook', { method: 'POST', body, headers: { [SIGNATURE_HEADER]: sign(['whsec_x'], body, t) } }),
+    )
+    expect(res.status).toBe(202)
+    for (let i = 0; i < 100 && log.lines.filter((l) => l.code === 'agent_turn_cap').length === before; i++) {
+      await new Promise((r) => setTimeout(r, 20))
+    }
+    // The responder read the thread again; the watcher's loop may have visited it too.
+    expect(log.lines.filter((l) => l.code === 'agent_turn_cap').length).toBeGreaterThan(before)
+    expect(log.lines.some((l) => l.code === 'tools_unchecked' || l.code === 'tools_missing')).toBe(false)
   })
 })

@@ -28,8 +28,13 @@ one message, in any process, sends one reply, which the node records once.
 
 It also needs the owner MCP's asks and notices (`ask_owner`, `notify_owner`, `list_asks`): the
 first hdtp-gateway release that carries them (N1, the owner's asks, on hdtp-gateway's
-`feat/owner-asks`; no release carries it yet). On a node without them nothing is drafted: the
-agent reads its turn schema from them first, and logs `ask_owner:tool_not_offered`.
+`feat/owner-asks`; no release carries it yet). At start, before it reads any thread, the agent
+checks that the node offers every tool it calls. If one is missing it answers nothing, and logs
+one line naming the missing tools, for example
+`{"level":"warn","code":"tools_missing","tools":"ask_owner,notify_owner,list_asks"}`. A tool the
+node lists but the MCP client cannot take is named too, with the reason in `skipped`
+(`ask_owner:schema_too_large`, `schema_too_deep` or `schema_invalid`). After the node is upgraded,
+restart the agent.
 
 ## Each turn: reply, ask, notify or none
 

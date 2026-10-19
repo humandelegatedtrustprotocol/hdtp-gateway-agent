@@ -1,14 +1,16 @@
 // The real client path: @mastra/mcp's MCPClient against an owner MCP served over HTTP as the node
 // serves it (test/wire.ts).
 
+import { readFileSync } from 'node:fs'
 import type { Server } from 'node:http'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { NodeRefusal, connectNode } from '../src/hdtp/node.ts'
+import { NodeRefusal, TOOLS_CALLED, connectNode } from '../src/hdtp/node.ts'
+import { missingTools } from '../src/hdtp/runtime.ts'
 import { Responder } from '../src/hdtp/responder.ts'
 import { SIGNATURE_HEADER } from '../src/hdtp/signature.ts'
 import { createReceiver } from '../src/hdtp/webhook.ts'
 import { FakeNode, TOOLS, ask, envelope, memoryLog, reply, rules, sign } from './fakes.ts'
-import { TOKEN, closedPort, serve } from './wire.ts'
+import { LISTED, TOKEN, closedPort, deepSchema, listedWith, serve, wideSchema, type ListedTool } from './wire.ts'
 
 describe('the owner MCP over the wire', () => {
   const node = new FakeNode()
@@ -156,5 +158,66 @@ describe('the owner MCP over the wire', () => {
     } finally {
       await disconnect()
     }
+  })
+})
+
+describe('the boot check over the wire', () => {
+  // The listing the client takes from a node serving `tools`, held to the tools this agent calls.
+  const missing = async (tools: ListedTool[]) => {
+    const { server, url } = await serve(new FakeNode(), 0, tools)
+    const { node: client, disconnect } = connectNode(url, TOKEN)
+    try {
+      return await missingTools(client)
+    } finally {
+      await disconnect()
+      server.closeAllConnections()
+      await new Promise<void>((r) => server.close(() => r()))
+    }
+  }
+
+  it('passes the node’s tools as listed', async () => {
+    expect(await missing(LISTED)).toEqual({ tools: [], skipped: [] })
+  })
+
+  it('names a tool the client skipped, with the schema’s fault as a code', async () => {
+    expect(await missing(listedWith('ask_owner', wideSchema(10_001)))).toEqual({
+      tools: ['ask_owner'],
+      skipped: ['ask_owner:schema_too_large'],
+    })
+    expect(await missing(listedWith('notify_owner', deepSchema(130)))).toEqual({
+      tools: ['notify_owner'],
+      skipped: ['notify_owner:schema_too_deep'],
+    })
+    expect(await missing(listedWith('list_asks', { type: 'object', properties: { thread_id: { type: 'no_such_type' } } }))).toEqual({
+      tools: ['list_asks'],
+      skipped: ['list_asks:schema_invalid'],
+    })
+  })
+
+  it('reports only what the listing it read skipped, once the node is listed again', async () => {
+    const tools = listedWith('ask_owner', wideSchema(10_001))
+    const { server, url } = await serve(new FakeNode(), 0, tools)
+    const { node: client, disconnect } = connectNode(url, TOKEN)
+    try {
+      expect((await client.listTools()).skipped).toEqual({ ask_owner: 'schema_too_large' })
+      // The node is upgraded; a tool it does not offer makes the client list it again.
+      tools.splice(0, tools.length, ...LISTED)
+      expect(((await client.toolSchema('no_such_tool').catch((e: unknown) => e)) as NodeRefusal).code).toBe('tool_not_offered')
+      expect(await client.listTools()).toEqual({ offered: LISTED.map((t) => t.name), skipped: {} })
+    } finally {
+      await disconnect()
+      server.closeAllConnections()
+      await new Promise<void>((r) => server.close(() => r()))
+    }
+  })
+
+  it('names a tool the node does not list, with no reason to give', async () => {
+    expect(await missing(LISTED.filter((t) => t.name !== 'list_asks'))).toEqual({ tools: ['list_asks'], skipped: [] })
+  })
+
+  it('checks every tool node.ts calls', async () => {
+    const source = readFileSync(new URL('../src/hdtp/node.ts', import.meta.url), 'utf8')
+    const called = [...source.matchAll(/json\('([a-z_]+)'/g)].map((m) => m[1])
+    expect([...TOOLS_CALLED].sort()).toEqual([...new Set(called)].sort())
   })
 })

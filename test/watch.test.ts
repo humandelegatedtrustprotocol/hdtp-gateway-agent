@@ -11,7 +11,7 @@ import { FakeNode, memoryLog, ok, reply, rules, type ToolAnswer } from './fakes.
 function setup(draft: Draft = async () => reply('an answer')) {
   const node = new FakeNode()
   const log = memoryLog()
-  const client = nodeClientOver(node.call, node.toolSchema)
+  const client = nodeClientOver(node.call, node.catalog)
   const responder = new Responder(client, draft, log, rules())
   const watcher = new Watcher(client, (accountId) => responder.reconcileAccount(accountId), log)
   return { node, log, watcher }
@@ -144,7 +144,7 @@ describe('the wait_for_updates loop', () => {
     const log = memoryLog()
     let passes = 0
     const watcher = new Watcher(
-      nodeClientOver(node.call, node.toolSchema),
+      nodeClientOver(node.call, node.catalog),
       async () => {
         if (++passes === 1) throw new NodeRefusal('get_inbox', 'internal')
       },
