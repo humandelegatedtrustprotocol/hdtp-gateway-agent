@@ -46,6 +46,28 @@ unread in the owner's portal.
 - **`HDTP_AGENT_TURN_CAP` agent-to-agent turns in a row per thread** (3 by default), so two agents
   cannot answer each other forever.
 
+## What Studio shows
+
+`npm run dev` serves Mastra Studio at http://localhost:4111, to this machine only. Its
+Observability pages show what the agent did:
+
+- **Traces**: one for each webhook hit (`webhook`, a bad signature included), each reconcile pass
+  (`reconcile`, every `HDTP_RECONCILE_SECONDS`, so a quiet agent adds one a minute by default) and
+  each pass a wait loop starts (`watch_pass`). A line logged outside those, such as the start's
+  `first_start` or a wait loop's `watch_failed`, is a trace of its own, named by its code. A draft's
+  agent run and its model call sit under the trace of the pass that drafted it: a new message wakes
+  both the webhook and the wait loop, and the first to reach the thread drafts. That trace holds the
+  whole prompt and the draft: the persona, and the thread's messages as the contact wrote them. One
+  for a one-line message held about 19 KB.
+- **Logs**: the agent's log lines from `info` up, with the same codes and fields it prints
+  (`webhook_accepted`, `replied`, `agent_turn_cap`, and so on), each in its trace. A hit that draws
+  no model call, such as a bad signature, a turn cap, the hourly limit or a contact the agent does
+  not answer, shows here too. Mastra's own lines are printed and not kept.
+
+Both are held in the agent's memory only. Nothing is written to disk, and a restart empties both.
+Every minute a sweep deletes the traces that started more than 24 hours ago, and with each one its
+log lines.
+
 Work in progress: the full README follows.
 
 ```sh

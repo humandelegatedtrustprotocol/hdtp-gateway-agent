@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { nodeClientOver } from '../src/hdtp/node.ts'
 import { Responder } from '../src/hdtp/responder.ts'
+import type { Log, Trace } from '../src/hdtp/log.ts'
 import { SIGNATURE_HEADER } from '../src/hdtp/signature.ts'
 import { MAX_BODY_BYTES, createReceiver, type Handlers } from '../src/hdtp/webhook.ts'
 import { FakeNode, envelope, memoryLog, rules, sign } from './fakes.ts'
@@ -34,6 +35,42 @@ function setup(opts: { secret?: string | undefined } = {}) {
 }
 
 describe('POST /hdtp/webhook', () => {
+  it('holds each hit in one span, from the request to the end of its task', async () => {
+    const events: string[] = []
+    const log: Log = { info: (code) => void events.push(code), warn: (code) => void events.push(code) }
+    const trace: Trace = async (name, fn) => {
+      events.push(`open:${name}`)
+      try {
+        return await fn()
+      } finally {
+        events.push(`end:${name}`)
+      }
+    }
+    let release: (() => void) | undefined
+    const receive = createReceiver({
+      secret: () => secret,
+      log,
+      trace,
+      now: () => now,
+      handlers: {
+        message: () => new Promise<void>((r) => (release = r)).then(() => Promise.reject(new Error('down'))),
+        reconcile: async () => {},
+        request: async () => {},
+      },
+    })
+    const tick = async (done: () => boolean) => {
+      for (let i = 0; i < 50 && !done(); i++) await new Promise((r) => setImmediate(r))
+    }
+    const res = await receive(signed(envelope('evt_1', 'message.received', { thread_id: 'th1' })))
+    expect(res.status).toBe(202)
+    // Answered while its task runs, the span still open.
+    await tick(() => release !== undefined)
+    expect(events).toEqual(['open:webhook', 'webhook_accepted'])
+    release!()
+    await tick(() => events.includes('end:webhook'))
+    expect(events).toEqual(['open:webhook', 'webhook_accepted', 'webhook_task_failed', 'end:webhook'])
+  })
+
   it('refuses a forged body before any call to the node', async () => {
     const node = new FakeNode()
     node.thread('th1')

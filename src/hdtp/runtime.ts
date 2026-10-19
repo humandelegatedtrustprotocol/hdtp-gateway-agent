@@ -13,8 +13,9 @@
 // answers.
 
 import type { Agent } from '@mastra/core/agent'
+import { getCurrentSpan } from '@mastra/core/observability/context-storage'
 import type { Config } from './config.ts'
-import { consoleLog, type Log } from './log.ts'
+import { consoleLog, untraced, type Log, type Trace } from './log.ts'
 import { FirstStartUnreadable, firstStart } from './first-start.ts'
 import { connectNode, refusalCode } from './node.ts'
 import { Responder } from './responder.ts'
@@ -28,8 +29,11 @@ export function receive(req: Request): Promise<Response> {
   return receiver ? receiver(req) : Promise.resolve(Response.json({ code: 'not_started' }, { status: 503 }))
 }
 
-/** Starts the runtime once; the function returned stops its loops and its timers. */
-export function startRuntime(config: Config, agent: Agent, log: Log = consoleLog): () => void {
+/**
+ * Starts the runtime once; the function returned stops its loops and its timers. Each webhook hit,
+ * reconcile pass and wait loop's pass runs in a span of `trace`'s.
+ */
+export function startRuntime(config: Config, agent: Agent, log: Log = consoleLog, trace: Trace = untraced): () => void {
   if (receiver) return () => {}
   let responder: Responder | null = null
   let stop = () => {}
@@ -53,7 +57,9 @@ export function startRuntime(config: Config, agent: Agent, log: Log = consoleLog
     log.warn(idleWhy)
   } else {
     const { node } = connectNode(config.ownerMcpUrl, token)
-    const draft = async (prompt: string) => (await agent.generate(prompt)).text
+    // The agent run is kept under the span the draft is made in, as one trace with it.
+    const draft = async (prompt: string) =>
+      (await agent.generate(prompt, { tracingContext: { currentSpan: getCurrentSpan() } })).text
     const r = new Responder(node, draft, log, {
       answer: config.answer,
       turnCap: config.agentTurnCap,
@@ -62,7 +68,7 @@ export function startRuntime(config: Config, agent: Agent, log: Log = consoleLog
       now,
     })
     responder = r
-    const watcher = new Watcher(node, (accountId) => r.reconcileAccount(accountId), log)
+    const watcher = new Watcher(node, (accountId) => trace('watch_pass', () => r.reconcileAccount(accountId)), log)
     let sweeping = false
     let failures = 0
     let retry: ReturnType<typeof setTimeout> | undefined
@@ -70,11 +76,15 @@ export function startRuntime(config: Config, agent: Agent, log: Log = consoleLog
       if (sweeping) return
       sweeping = true
       try {
-        await r.reconcile((accounts) => watcher.sync(accounts))
-        failures = 0
-      } catch (e) {
-        log.warn('reconcile_failed', { reason: refusalCode(e) })
-        if (!watcher.watching) retry = setTimeout(() => void sweep(), backoff(++failures)).unref()
+        await trace('reconcile', async () => {
+          try {
+            await r.reconcile((accounts) => watcher.sync(accounts))
+            failures = 0
+          } catch (e) {
+            log.warn('reconcile_failed', { reason: refusalCode(e) })
+            if (!watcher.watching) retry = setTimeout(() => void sweep(), backoff(++failures)).unref()
+          }
+        })
       } finally {
         sweeping = false
       }
@@ -91,6 +101,7 @@ export function startRuntime(config: Config, agent: Agent, log: Log = consoleLog
   receiver = createReceiver({
     secret: () => config.webhookSecret,
     log,
+    trace,
     handlers: {
       message: (thread) => (responder ? responder.onMessage(thread) : idle()),
       reconcile: () => (responder ? responder.reconcile() : idle()),
