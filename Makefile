@@ -29,4 +29,4 @@ node_modules: package-lock.json
 # The turn eval (eval/run.ts): real model calls, 50 at most, so not part of check. EVAL passes its
 # flags, e.g. EVAL=--dry, or EVAL='--runs 1 --only u1-3'.
 eval: node_modules
-	node --env-file-if-exists=.env eval/run.ts $(EVAL)
+	@node --env-file-if-exists=.env eval/run.ts $(EVAL)
