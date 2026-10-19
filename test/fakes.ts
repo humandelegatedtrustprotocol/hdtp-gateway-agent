@@ -4,6 +4,8 @@
 import { createHmac } from 'node:crypto'
 import type { Log } from '../src/hdtp/log.ts'
 import type { PendingRequest, ThreadMessage } from '../src/hdtp/node.ts'
+import type { Rules } from '../src/hdtp/responder.ts'
+import { DEFAULT_AGENT_TURN_CAP, DEFAULT_REPLIES_PER_HOUR } from '../src/hdtp/config.ts'
 
 /** `t=<t>,v1=<hmac>[,v1=<hmac>]` over `<t>.<body>`, written from the grammar, not from the verifier. */
 export function sign(secrets: string[], body: string, t: number): string {
@@ -13,6 +15,16 @@ export function sign(secrets: string[], body: string, t: number): string {
 
 export function envelope(id: string, type: string, data: Record<string, unknown>): string {
   return JSON.stringify({ id, type, created_at: 1_760_000_000_000, identity: 'alex', data })
+}
+
+/** The responder's rules at their defaults, on the host's clock, with any of them replaced. */
+export function rules(over: Partial<Rules> = {}): Rules {
+  return {
+    turnCap: DEFAULT_AGENT_TURN_CAP,
+    repliesPerHour: DEFAULT_REPLIES_PER_HOUR,
+    now: () => Math.floor(Date.now() / 1000),
+    ...over,
+  }
 }
 
 export function memoryLog(): Log & { lines: Array<{ code: string; fields?: Record<string, unknown> }> } {

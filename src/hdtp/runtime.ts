@@ -38,7 +38,11 @@ export function startRuntime(config: Config, agent: Agent, log: Log = consoleLog
   } else {
     const { node } = connectNode(config.ownerMcpUrl, config.ownerToken)
     const draft = async (prompt: string) => (await agent.generate(prompt)).text
-    const r = new Responder(node, draft, log, config.agentTurnCap)
+    const r = new Responder(node, draft, log, {
+      turnCap: config.agentTurnCap,
+      repliesPerHour: config.repliesPerHour,
+      now: () => Math.floor(Date.now() / 1000),
+    })
     responder = r
     const watcher = new Watcher(node, (accountId) => r.reconcileAccount(accountId), log)
     let sweeping = false

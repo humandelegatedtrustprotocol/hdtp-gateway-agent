@@ -8,6 +8,8 @@ export const DEFAULT_RECONCILE_SECONDS = 60
 export const DEFAULT_PERSONA_FILE = 'persona.md'
 /** How many agent-to-agent turns in a row a thread may have before the agent stops answering it. */
 export const DEFAULT_AGENT_TURN_CAP = 3
+/** How many drafts one contact may have in an hour, whatever the sender labels say. */
+export const DEFAULT_REPLIES_PER_HOUR = 10
 
 export interface Config {
   model: string
@@ -17,6 +19,7 @@ export interface Config {
   reconcileSeconds: number
   personaFile: string
   agentTurnCap: number
+  repliesPerHour: number
 }
 
 const set = (v: string | undefined) => (v === undefined || v.trim() === '' ? undefined : v.trim())
@@ -36,5 +39,6 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
     reconcileSeconds: count(env.HDTP_RECONCILE_SECONDS, DEFAULT_RECONCILE_SECONDS),
     personaFile: set(env.HDTP_PERSONA_FILE) ?? DEFAULT_PERSONA_FILE,
     agentTurnCap: count(env.HDTP_AGENT_TURN_CAP, DEFAULT_AGENT_TURN_CAP),
+    repliesPerHour: count(env.HDTP_AGENT_REPLIES_PER_HOUR, DEFAULT_REPLIES_PER_HOUR),
   }
 }

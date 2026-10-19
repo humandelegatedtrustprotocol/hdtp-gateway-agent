@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { nodeClientOver } from '../src/hdtp/node.ts'
 import { FRAME, THREAD_WINDOW, threadPrompt } from '../src/hdtp/prompt.ts'
-import { MAX_ATTEMPTS, Responder, agentTurns } from '../src/hdtp/responder.ts'
-import { FakeNode, memoryLog } from './fakes.ts'
+import { BUDGET_WINDOW_SECONDS } from '../src/hdtp/budget.ts'
+import { MAX_ATTEMPTS, Responder, agentTurns, type Rules } from '../src/hdtp/responder.ts'
+import { FakeNode, memoryLog, rules } from './fakes.ts'
 
-function setup(draft?: (prompt: string) => Promise<string>) {
+function setup(draft?: (prompt: string) => Promise<string>, over: Partial<Rules> = {}) {
   const node = new FakeNode()
   const prompts: string[] = []
   const log = memoryLog()
@@ -16,6 +17,7 @@ function setup(draft?: (prompt: string) => Promise<string>) {
         return `reply ${prompts.length}`
       }),
     log,
+    rules(over),
   )
   return { node, prompts, responder, log }
 }
@@ -60,7 +62,7 @@ describe('one reply per newest inbound message', () => {
     node.inbound('th1', 'hello')
     await responder.onMessage('th1')
     // A restart: a new responder with nothing remembered, reaching the same message by webhook.
-    const again = new Responder(nodeClientOver(node.call), async () => 'second draft', memoryLog())
+    const again = new Responder(nodeClientOver(node.call), async () => 'second draft', memoryLog(), rules())
     // Its message is no longer the newest, so it does not draft at all...
     await again.onMessage('th1')
     expect(node.sent).toHaveLength(1)
@@ -233,6 +235,64 @@ describe('a thread between two agents', () => {
     expect(a.node.sent).toHaveLength(3)
     expect(b.node.sent).toHaveLength(3)
     expect(a.log.lines.map((l) => l.code)).toContain('agent_turn_cap')
+  })
+})
+
+describe('the budget of drafts per contact', () => {
+  it('stops a peer that labels every message human at the budget, and leaves the thread unread', async () => {
+    const { node, prompts, responder, log } = setup(undefined, { repliesPerHour: 3 })
+    node.thread('th1')
+    for (let i = 0; i < 5; i++) {
+      node.inbound('th1', `a person, says the label ${i}`, 'human')
+      await responder.onMessage('th1')
+    }
+    expect(prompts).toHaveLength(3)
+    expect(node.sent).toHaveLength(3)
+    expect(log.lines.filter((l) => l.code === 'contact_budget').map((l) => l.fields)).toEqual([{ thread_id: 'th1' }, { thread_id: 'th1' }])
+    // Refused before read_thread: the owner still sees the two messages over the budget unread.
+    expect(node.calls.filter((c) => c === 'read_thread')).toHaveLength(3)
+    expect((await nodeClientOver(node.call).getInbox('acct-1'))[0]!.unread).toBe(2)
+  })
+
+  it('is one budget for every thread and request of a contact, and another contact has its own', async () => {
+    const { node, prompts, responder } = setup(undefined, { repliesPerHour: 2 })
+    node.thread('th1')
+    node.thread('th2')
+    node.thread('th-other', 'fpr-other')
+    node.inbound('th1', 'one')
+    node.inbound('th2', 'two')
+    node.inbound('th-other', 'someone else')
+    node.pending.push({ ID: 'req1', ContactFpr: 'fpr-contact', Capability: 'ask_alex', Args: '{}', Status: 'open', ExpiresAt: 0 })
+    await responder.reconcile()
+    // The request is answered first, then one of fpr-contact's two threads; the other contact's is answered too.
+    expect(node.answered).toHaveLength(1)
+    expect(node.sent.map((s) => s.contact_fpr).sort()).toEqual(['fpr-contact', 'fpr-other'])
+    expect(prompts).toHaveLength(3)
+  })
+
+  it('counts a draft that failed, and gives the contact more once the hour has moved on', async () => {
+    let t = 1_800_000_000
+    let fail = true
+    let drafts = 0
+    const { node, responder } = setup(
+      async () => {
+        drafts++
+        if (fail) throw new Error('model down')
+        return 'reply'
+      },
+      { repliesPerHour: 1, now: () => t },
+    )
+    node.thread('th1')
+    node.inbound('th1', 'hello')
+    await responder.onMessage('th1')
+    fail = false
+    await responder.reconcile()
+    expect(drafts).toBe(1)
+    expect(node.sent).toEqual([])
+    t += BUDGET_WINDOW_SECONDS
+    await responder.reconcile()
+    expect(drafts).toBe(2)
+    expect(node.sent).toHaveLength(1)
   })
 })
 

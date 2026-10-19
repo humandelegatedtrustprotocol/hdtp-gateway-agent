@@ -10,7 +10,9 @@
 //
 // A thread whose contact's side is an agent too would otherwise be answered for as long as both
 // agents run. agentTurns counts the turns since the last message labelled as a person's, and at
-// the configured cap the thread is left alone until a person writes in it.
+// the configured cap the thread is left alone until a person writes in it. The label is the one
+// the contact's side claims, so a budget that reads no label (budget.ts) bounds the drafts for each
+// contact as well: it is checked before read_thread, so a thread over it stays unread for the owner.
 //
 // Every contact is treated as messages_only, on purpose: the trust flag the node reports
 // (read_thread's `trust`, list_pending's TrustFlag) is neither read nor shown to the model. This
@@ -28,7 +30,7 @@ import type { Log } from './log.ts'
 import { NodeRefusal, refusalCode, type InboxThread, type NodeClient, type PendingRequest, type ThreadMessage } from './node.ts'
 import { Bounded } from './bounded.ts'
 import { requestPrompt, threadPrompt } from './prompt.ts'
-import { DEFAULT_AGENT_TURN_CAP } from './config.ts'
+import { Budget } from './budget.ts'
 
 /** Writes the reply text for a prompt. The model behind it has no tools. */
 export type Draft = (prompt: string) => Promise<string>
@@ -66,6 +68,19 @@ export function agentTurns(messages: readonly ThreadMessage[]): number {
   return turns
 }
 
+/** What decides whether to draft. */
+export interface Rules {
+  /** Agent-to-agent turns in a row a thread may have (HDTP_AGENT_TURN_CAP). */
+  turnCap: number
+  /** Drafts per contact per hour, whatever the labels say (HDTP_AGENT_REPLIES_PER_HOUR). */
+  repliesPerHour: number
+  /** Unix seconds now. */
+  now: () => number
+}
+
+/** The budget's key for a contact of an account. */
+const contactKey = (accountId: string, contactFpr: string) => `${accountId}\0${contactFpr}`
+
 export class Responder {
   /** Keys of replies sent (msg_ids) and of requests answered. */
   private readonly done = new Bounded<true>(REMEMBERED)
@@ -80,12 +95,14 @@ export class Responder {
   private readonly draft: Draft
   private readonly log: Log
   private readonly turnCap: number
+  private readonly budget: Budget
 
-  constructor(node: NodeClient, draft: Draft, log: Log, turnCap = DEFAULT_AGENT_TURN_CAP) {
+  constructor(node: NodeClient, draft: Draft, log: Log, rules: Rules) {
     this.node = node
     this.draft = draft
     this.log = log
-    this.turnCap = turnCap
+    this.turnCap = rules.turnCap
+    this.budget = new Budget(rules.repliesPerHour, rules.now)
   }
 
   /** A webhook's message.received: the thread it names, in whichever account holds it. */
@@ -170,7 +187,14 @@ export class Responder {
       this.log.info('contact_not_active', { thread_id: row.thread_id, status: row.contact_status })
       return
     }
+    const contact = contactKey(accountId, row.contact_fpr)
     await this.single(where, async () => {
+      if (!this.budget.room(contact)) {
+        // Kept to revisit, if it was: a thread a failed draft left read is answered once the
+        // hour moves on, as an unread one is.
+        this.log.info('contact_budget', { thread_id: row.thread_id })
+        return
+      }
       const messages = await this.node.readThread(accountId, row.thread_id)
       const index = messages.length - 1
       const newest = messages[index]
@@ -190,7 +214,7 @@ export class Responder {
         return
       }
       await this.attempt(key, where, { thread_id: row.thread_id }, async () => {
-        const text = await this.write(threadPrompt(messages))
+        const text = await this.write(contact, threadPrompt(messages))
         await this.node.sendToContact({
           account_id: accountId,
           contact_fpr: row.contact_fpr,
@@ -205,18 +229,28 @@ export class Responder {
 
   async answerRequest(accountId: string, row: PendingRequest): Promise<void> {
     const key = `request\0${accountId}\0${row.ID}`
+    const contact = contactKey(accountId, row.ContactFpr)
     await this.single(key, async () => {
       if (this.done.has(key)) return
+      if (!this.budget.room(contact)) {
+        this.log.info('contact_budget', { request_id: row.ID })
+        return
+      }
       await this.attempt(key, null, { request_id: row.ID }, async () => {
-        const result = await this.write(requestPrompt(row))
+        const result = await this.write(contact, requestPrompt(row))
         await this.node.answerRequest({ account_id: accountId, request_id: row.ID, result })
         this.log.info('answered', { request_id: row.ID })
       })
     })
   }
 
-  /** The model's text for a prompt; a failure or an empty text is a refusal named draft. */
-  private async write(prompt: string): Promise<string> {
+  /**
+   * The model's text for a prompt, counted against the contact's budget; a failure or an empty text
+   * is a refusal named draft. The budget was checked before the work began, and is checked again
+   * here, where it is spent, for drafts of one contact that ran side by side.
+   */
+  private async write(contact: string, prompt: string): Promise<string> {
+    if (!this.budget.take(contact)) throw new NodeRefusal('draft', 'contact_budget')
     let text: string
     try {
       text = (await this.draft(prompt)).trim()

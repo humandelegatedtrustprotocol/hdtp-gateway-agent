@@ -58,6 +58,12 @@ describe('the configuration', () => {
     expect(readConfig({ HDTP_AGENT_TURN_CAP: '2.5' }).agentTurnCap).toBe(3)
   })
 
+  it('allows 10 drafts per contact per hour by default, and a whole number above 0 when set', () => {
+    expect(readConfig({}).repliesPerHour).toBe(10)
+    expect(readConfig({ HDTP_AGENT_REPLIES_PER_HOUR: '2' }).repliesPerHour).toBe(2)
+    expect(readConfig({ HDTP_AGENT_REPLIES_PER_HOUR: '0' }).repliesPerHour).toBe(10)
+  })
+
   it('lists every variable it reads in .env.example', () => {
     const example = readFileSync('.env.example', 'utf8')
     const source = readFileSync('src/hdtp/config.ts', 'utf8')
