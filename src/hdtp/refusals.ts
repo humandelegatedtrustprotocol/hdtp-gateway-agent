@@ -3,9 +3,10 @@
 // (node.ts, decodeAnswer), so it never reaches a prompt; a code with no line here adds nothing.
 //
 // The surface rules are the node's (hdtp-gateway internal/services/asks/catalog.go, each refusal's
-// Rule), each line written from the node's own refusal at the sha test/surface-rules.json records;
-// that file lists the rules, and a test holds the keys below equal to it. A rule a newer node adds
-// is still named to the model, with the line for a rule this agent does not know.
+// Rule), each line written from the node's own refusal at hdtp-gateway 144945d and read again at
+// 34a6adf (test/retry.test.ts names both); test/surface-rules.json lists the rules, and a test
+// holds the keys below equal to it. A rule a newer node adds is still named to the model, with the
+// line for a rule this agent does not know.
 
 import { NodeRefusal } from './node.ts'
 
@@ -70,7 +71,7 @@ export const SURFACE_RULES: Readonly<Record<string, string>> = {
   tldr_second: "The TLDR, root's first child, comes second in the list of components, right after root.",
   tldr_size: 'The TLDR was over its size: one short line.',
   input_count: 'A surface has at most one ChoicePicker and one TextField.',
-  reply_count: 'The surface had more ready replies than the node takes: one to three.',
+  reply_count: 'The surface had more ready replies than the node takes: at most three.',
   context_unbound: "An event's context read a {path} that no input binds.",
   own_message:
     "An ask ends with the person's own message: root's next-to-last child is the TextField, and its last the Button whose context reads the TextField's path.",
