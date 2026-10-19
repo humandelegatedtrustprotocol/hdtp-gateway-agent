@@ -17,6 +17,7 @@ import { request, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { FRAME } from '../src/hdtp/prompt.ts'
 import { SIGNATURE_HEADER } from '../src/hdtp/signature.ts'
 import { FakeNode, envelope, sign } from './fakes.ts'
 import { TOKEN, closedPort, serve } from './wire.ts'
@@ -220,7 +221,7 @@ describe('the served process under `mastra dev`', () => {
         const res = await hostRequest(port, host, 'GET', '/api/agents/delegate')
         expect(res.status, host).toBe(200)
         const a = JSON.parse(res.body) as { provider: string; modelId: string; instructions: string }
-        expect(a.instructions, host).toContain('You write on behalf of the person described below')
+        expect(a.instructions, host).toContain(FRAME.split('\n')[0])
         return `${a.provider}/${a.modelId}`
       }
       // Studio's two addresses: its page and its API.

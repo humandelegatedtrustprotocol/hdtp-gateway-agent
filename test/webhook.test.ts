@@ -3,7 +3,7 @@ import { nodeClientOver } from '../src/hdtp/node.ts'
 import { Responder } from '../src/hdtp/responder.ts'
 import { SIGNATURE_HEADER } from '../src/hdtp/signature.ts'
 import { MAX_BODY_BYTES, createReceiver, type Handlers } from '../src/hdtp/webhook.ts'
-import { FakeNode, envelope, memoryLog, rules, sign } from './fakes.ts'
+import { FakeNode, envelope, memoryLog, reply, rules, sign } from './fakes.ts'
 
 const secret = 'whsec_current'
 const now = 1_760_000_000
@@ -39,7 +39,7 @@ describe('POST /hdtp/webhook', () => {
     node.thread('th1')
     node.inbound('th1', 'hello')
     let drafted = 0
-    const responder = new Responder(nodeClientOver(node.call), async () => (drafted++, 'hi'), memoryLog(), rules())
+    const responder = new Responder(nodeClientOver(node.call, node.toolSchema), async () => (drafted++, reply('hi')), memoryLog(), rules())
     const tasks: Array<Promise<void>> = []
     const receive = createReceiver({
       secret: () => secret,

@@ -2,8 +2,9 @@
 
 An open-source [Mastra](https://mastra.ai) agent that answers an
 [hdtp-gateway](https://github.com/humandelegatedtrustprotocol/hdtp-gateway) node's contacts on
-behalf of its owner, in the voice `persona.md` sets. It is woken by the node's webhook and acts
-through the node's owner MCP; the model drafts the text and has no tools.
+behalf of its owner, in the voice `persona.md` sets, and asks the owner when the decision is
+theirs. It is woken by the node's webhook and acts through the node's owner MCP; the model chooses
+each turn and has no tools.
 
 The model is OpenAI's GPT-6 Luna through
 [OpenRouter](https://mastra.ai/models/gateways/openrouter) by default
@@ -25,6 +26,49 @@ give none, and the agent answers no thread of theirs (`message_id_missing` in it
 is sent under a `msg_id` derived from the id of the message it answers, so every path that reaches
 one message, in any process, sends one reply, which the node records once.
 
+It also needs the owner MCP's asks and notices (`ask_owner`, `notify_owner`, `list_asks`): the
+first hdtp-gateway release that carries them (N1, the owner's asks, on hdtp-gateway's
+`feat/owner-asks`; no release carries it yet). On a node without them nothing is drafted: the
+agent reads its turn schema from them first, and logs `ask_owner:tool_not_offered`.
+
+## Each turn: reply, ask, notify or none
+
+For the contact's newest message the model returns one JSON object, one of four turns. Code checks
+it against a schema built from the node's own tool schemas (read from its `tools/list`), and refuses
+anything else by code (`draft:invalid_turn`); a refused turn is drafted again on a later pass, up to
+3 attempts, as a failed draft always was.
+
+- **reply**: a message to the contact, sent with `send_to_contact`.
+- **ask**: a card for the owner, put with `ask_owner` for the message it is about, from the node's
+  component catalog: a one-line TLDR and the key terms first, one to three ready replies, and a box
+  to write their own last. Nothing goes to the contact. While any ask of a thread is open the agent
+  drafts nothing on that thread, and a newer message from the contact stays unread for the owner.
+  A ready reply the owner taps, or words they write, are sent to the contact by the node as the
+  owner's message; the agent then carries on from the thread. An ask that ends with its message still
+  the newest (answered with no message, or expired) is drafted for once more, with what became of it,
+  and only a reply, a notice or none is offered then.
+- **notify**: a card for the owner with no buttons, put with `notify_owner`: a TLDR of what the
+  agent agreed. A reply to the contact may go with it, sent first. A notice the node did not take is
+  put again on later passes, with no new draft.
+- **none**: nothing is sent, for an acknowledgement or a sign-off, so two agents end a conversation
+  when it ends rather than at the turn cap. It counts as answered: the message is not drafted for
+  again.
+
+An agent-answered request takes a reply only; its text is the answer.
+
+## Autonomy
+
+The persona says, per topic, which of two stances the agent takes:
+
+- **ask before committing**: it proposes and negotiates within the limits, then asks before
+  anything is agreed;
+- **commit within limits and notify**: it agrees within the limits, then notifies the owner.
+
+`persona.md` has an example `## Autonomy` section, and `examples/personas/` has both sides of seven
+use cases (a meeting, an event venue, GPU procurement, a rent renewal, a dentist's appointment, a
+leave request, a refund), each with its limits and its stances. The model follows the stances; code
+does not read them. What code enforces is the rules below, which hold for every turn.
+
 ## What it answers, and what it leaves to the owner
 
 The first three rules are decided before the agent reads a thread, so whatever they leave is still
@@ -40,9 +84,10 @@ unread in the owner's portal.
   it. A thread whose newest message is older is the owner's backlog. Delete the file to make the
   next start count as the first. A file that is there and cannot be read stops the agent answering
   anything (`first_start_unreadable` in its log) until it is fixed or deleted.
-- **At most `HDTP_AGENT_REPLIES_PER_HOUR` drafts per contact per hour** (10 by default). Replies to
-  any of their threads and answers to their requests count alike, whatever the messages' sender
-  labels say. A restart starts every count again.
+- **At most `HDTP_AGENT_REPLIES_PER_HOUR` drafts per contact per hour** (10 by default). Every
+  turn drafted for any of their threads (a reply, an ask, a notice or none, sent or refused) and
+  every answer to their requests count alike, whatever the messages' sender labels say. A restart
+  starts every count again.
 - **`HDTP_AGENT_TURN_CAP` agent-to-agent turns in a row per thread** (3 by default), so two agents
   cannot answer each other forever.
 

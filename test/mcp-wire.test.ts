@@ -7,7 +7,7 @@ import { NodeRefusal, connectNode } from '../src/hdtp/node.ts'
 import { Responder } from '../src/hdtp/responder.ts'
 import { SIGNATURE_HEADER } from '../src/hdtp/signature.ts'
 import { createReceiver } from '../src/hdtp/webhook.ts'
-import { FakeNode, envelope, memoryLog, rules, sign } from './fakes.ts'
+import { FakeNode, TOOLS, ask, envelope, memoryLog, reply, rules, sign } from './fakes.ts'
 import { TOKEN, closedPort, serve } from './wire.ts'
 
 describe('the owner MCP over the wire', () => {
@@ -47,7 +47,7 @@ describe('the owner MCP over the wire', () => {
     node.inbound('th2', 'are you around?')
     const { node: client, disconnect } = connectNode(url, TOKEN)
     const tasks: Array<Promise<void>> = []
-    const responder = new Responder(client, async () => 'Yes, Alex is around.', memoryLog(), rules({ answer: 'trusted' }))
+    const responder = new Responder(client, async () => reply('Yes, Alex is around.'), memoryLog(), rules({ answer: 'trusted' }))
     const receive = createReceiver({
       secret: () => 'whsec_x',
       log: memoryLog(),
@@ -74,6 +74,27 @@ describe('the owner MCP over the wire', () => {
     expect(replies).toHaveLength(1)
     expect(replies[0]).toMatchObject({ account_id: 'acct-1', contact_fpr: 'fpr-contact', text: 'Yes, Alex is around.' })
     expect(replies[0]!.msg_id).toMatch(/^agent-reply-[0-9a-f]{32}$/)
+  })
+
+  it('reads the asks tools’ input schemas back as the node lists them, and puts an ask', async () => {
+    node.thread('th3')
+    node.inbound('th3', 'shall we book Wednesday?')
+    const { node: client, disconnect } = connectNode(url, TOKEN)
+    try {
+      for (const name of ['send_to_contact', 'ask_owner', 'notify_owner']) {
+        const listed = TOOLS.find((t) => t.name === name)!.inputSchema
+        const { $schema: _dialect, ...read } = await client.toolSchema(name)
+        expect(read, name).toEqual(listed)
+      }
+      const missing = await client.toolSchema('no_such_tool').catch((e: unknown) => e)
+      expect((missing as NodeRefusal).code).toBe('tool_not_offered')
+      const responder = new Responder(client, async () => ask('Book Wed?', { When: 'Wed' }, ['Yes, book it']), memoryLog(), rules())
+      await responder.onMessage('th3')
+      expect(node.asks.filter((a) => a.thread_id === 'th3')).toHaveLength(1)
+      expect((await client.listAsks('acct-1', 'th3')).map((a) => a.status)).toEqual(['open'])
+    } finally {
+      await disconnect()
+    }
   })
 
   it('waits from a cursor, and ends a held wait when its signal aborts', async () => {

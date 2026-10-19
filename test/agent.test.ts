@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { getProviderConfig, parseModelString } from '@mastra/core/llm'
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_MODEL, readConfig } from '../src/hdtp/config.ts'
@@ -37,6 +37,33 @@ describe('the delegate agent', () => {
 
   it('has no memory of its own', () => {
     expect(delegate.hasOwnMemory()).toBe(false)
+  })
+})
+
+describe('the personas', () => {
+  const examples = readdirSync('examples/personas').filter((f) => f.endsWith('.md'))
+  const files = ['persona.md', ...examples.map((f) => `examples/personas/${f}`)]
+
+  it('cover the seven use cases, both sides of each', () => {
+    const cases = new Map<string, number>()
+    for (const f of examples) {
+      const u = /^u([1-7])-/.exec(f)?.[1]
+      expect(u, f).toBeDefined()
+      cases.set(u!, (cases.get(u!) ?? 0) + 1)
+    }
+    expect([...cases.entries()].sort()).toEqual(['1', '2', '3', '4', '5', '6', '7'].map((u) => [u, 2]))
+  })
+
+  it('each load as the instructions, and give every topic of their autonomy one of the two stances', () => {
+    for (const f of files) {
+      const text = readFileSync(f, 'utf8')
+      expect(instructions(f), f).toBe(`${FRAME}\n\n${text.trim()}`)
+      const autonomy = text.split(/^## Autonomy$/m)[1]
+      expect(autonomy, f).toBeDefined()
+      const topics = autonomy!.split(/^## /m)[0]!.split('\n').filter((l) => l.startsWith('- '))
+      expect(topics.length, f).toBeGreaterThan(0)
+      for (const t of topics) expect(t, f).toMatch(/^- [^:]+: (ask before committing|commit within limits and notify)\./)
+    }
   })
 })
 

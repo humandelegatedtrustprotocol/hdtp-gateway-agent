@@ -1,4 +1,16 @@
-// Answering the node's contacts: one reply per newest inbound message, one answer per request.
+// Answering the node's contacts: one turn per newest inbound message, one answer per request.
+//
+// A turn (turn.ts) is a reply to the contact, an ask for the owner, a notice for the owner after an
+// optional reply, or none. An ask is put with ask_owner, keyed on the message it is about; while any
+// ask of a thread is open the thread is not drafted for, and it is checked before read_thread, so a
+// contact's newer message stays unread for the owner. The node holds the ask, so this survives a
+// restart. When the owner taps a ready reply or writes their own, the node sends it to the contact
+// as the owner's message, and the thread's newest message is then this side's. An ask that is no
+// longer open while its message is still the newest (answered with no message, withdrawn or
+// expired) is drafted for once more, with what became of it quoted to the model, and a reply,
+// notice or none is offered then, not another ask. none sends nothing and counts as answered: the
+// message is not drafted for again. A notice that notify_owner did not take is kept and put again
+// on later passes, with no new draft, since the reply before it already moved the thread on.
 //
 // A webhook names a thread or a request; reconciling walks list_pending and get_inbox, over every
 // account for a sweep and over one when the wait_for_updates loop (watch.ts) says something moved
@@ -29,7 +41,8 @@
 // is the owner's backlog, and is left unread for them. The cutoff is decided before read_thread.
 // It is not applied to requests: an open request is a caller waiting now, and it expires.
 //
-// read_thread marks the thread read before the model has drafted anything. A thread whose draft
+// read_thread marks the thread read before the model has drafted anything. A turn that does not
+// parse, or that the node refuses (an ask_owner surface outside its catalog), fails the attempt. A thread whose draft
 // or send failed is therefore kept here and revisited by the next reconcile pass, up to
 // MAX_ATTEMPTS times; a process that stops in between loses it, because the node no longer
 // counts it unread. A request stays in list_pending until it is answered or expires, so each
@@ -37,14 +50,27 @@
 
 import { createHash } from 'node:crypto'
 import type { Log } from './log.ts'
-import { NodeRefusal, refusalCode, type InboxThread, type NodeClient, type PendingRequest, type ThreadMessage } from './node.ts'
+import {
+  NodeRefusal,
+  refusalCode,
+  type InboxThread,
+  type NodeClient,
+  type PendingRequest,
+  type SurfaceArgs,
+  type ThreadMessage,
+} from './node.ts'
 import { Bounded } from './bounded.ts'
 import { requestPrompt, threadPrompt } from './prompt.ts'
 import { Budget } from './budget.ts'
 import type { Answer } from './config.ts'
+import { Turns, type Turn, type TurnType } from './turn.ts'
 
-/** Writes the reply text for a prompt. The model behind it has no tools. */
+/** Writes the model's answer for a prompt: a turn, as JSON text. The model behind it has no tools. */
 export type Draft = (prompt: string) => Promise<string>
+
+/** The turns offered for a message with no ask, and for one whose ask is no longer open. */
+export const FIRST_TURNS: readonly TurnType[] = ['reply', 'ask', 'notify', 'none']
+export const AFTER_ASK_TURNS: readonly TurnType[] = ['reply', 'notify', 'none']
 
 /**
  * How many attempts one inbound message or one request gets: the first from the webhook or the
@@ -106,6 +132,10 @@ export class Responder {
   private readonly attempts = new Bounded<number>(REMEMBERED)
   /** Threads (account \0 thread) to revisit on the next reconcile pass. */
   private readonly revisit = new Bounded<true>(REMEMBERED)
+  /** Threads with an open ask, visited by each reconcile pass until it is not. */
+  private readonly waiting = new Bounded<true>(REMEMBERED)
+  /** Notices a turn chose that notify_owner has not taken yet, by thread, with the reply key they follow. */
+  private readonly owed = new Bounded<{ key: string; args: SurfaceArgs }>(REMEMBERED)
   /** Work in flight by key, and whether another call asked for it while it ran. */
   private readonly running = new Map<string, { again: boolean }>()
 
@@ -116,9 +146,11 @@ export class Responder {
   private readonly answer: Answer
   private readonly firstStart: number
   private readonly budget: Budget
+  private readonly turns: Turns
 
   constructor(node: NodeClient, draft: Draft, log: Log, rules: Rules) {
     this.node = node
+    this.turns = new Turns(node)
     this.draft = draft
     this.log = log
     this.turnCap = rules.turnCap
@@ -157,7 +189,8 @@ export class Responder {
 
   /**
    * One pass over one account: its open requests first, since a caller is waiting on each, then
-   * its unread threads and the threads a failure left to revisit. A section that fails is logged
+   * its unread threads, the threads a failure left to revisit, those with an open ask, and those
+   * owing a notice. A section that fails is logged
    * by code and the pass goes on, so a failing list_pending does not keep threads unanswered.
    */
   async reconcileAccount(accountId: string): Promise<void> {
@@ -168,7 +201,8 @@ export class Responder {
     })
     await this.section('get_inbox', async () => {
       for (const row of await this.node.getInbox(accountId)) {
-        if (row.unread > 0 || this.revisit.has(`${accountId}\0${row.thread_id}`)) {
+        const where = `${accountId}\0${row.thread_id}`
+        if (row.unread > 0 || this.revisit.has(where) || this.waiting.has(where) || this.owed.has(where)) {
           await this.answerThread(accountId, row)
         }
       }
@@ -204,32 +238,46 @@ export class Responder {
 
   async answerThread(accountId: string, row: InboxThread): Promise<void> {
     const where = `${accountId}\0${row.thread_id}`
-    if (row.contact_status !== 'active') {
-      this.revisit.delete(where)
-      this.log.info('contact_not_active', { thread_id: row.thread_id, status: row.contact_status })
-      return
-    }
-    if (row.last_at < this.firstStart) {
-      this.revisit.delete(where)
-      this.log.info('before_first_start', { thread_id: row.thread_id })
-      return
-    }
-    const contact = contactKey(accountId, row.contact_fpr)
+    const ids = { thread_id: row.thread_id }
     await this.single(where, async () => {
+      // A notice already chosen is the owner's, whatever has happened to the contact since.
+      await this.deliver(where, ids)
+      if (row.contact_status !== 'active') {
+        this.revisit.delete(where)
+        this.waiting.delete(where)
+        this.log.info('contact_not_active', { thread_id: row.thread_id, status: row.contact_status })
+        return
+      }
+      if (row.last_at < this.firstStart) {
+        this.revisit.delete(where)
+        this.log.info('before_first_start', ids)
+        return
+      }
+      const contact = contactKey(accountId, row.contact_fpr)
       if (this.answer === 'trusted') {
         const c = (await this.node.listContacts(accountId)).find((x) => x.fingerprint === row.contact_fpr)
         if (c?.trust_flag !== TRUSTED) {
           this.revisit.delete(where)
-          this.log.info('contact_not_trusted', { thread_id: row.thread_id })
+          this.waiting.delete(where)
+          this.log.info('contact_not_trusted', ids)
           return
         }
       }
       if (!this.budget.room(contact)) {
         // Kept to revisit, if it was: a thread a failed draft left read is answered once the
         // hour moves on, as an unread one is.
-        this.log.info('contact_budget', { thread_id: row.thread_id })
+        this.log.info('contact_budget', ids)
         return
       }
+      const schema = await this.turns.schema()
+      const asks = await this.node.listAsks(accountId, row.thread_id)
+      if (asks.some((a) => a.status === 'open')) {
+        this.revisit.delete(where)
+        this.waiting.set(where, true)
+        this.log.info('ask_open', ids)
+        return
+      }
+      this.waiting.delete(where)
       const messages = await this.node.readThread(accountId, row.thread_id)
       const newest = messages.at(-1)
       if (!newest || newest.direction !== 'in') {
@@ -238,7 +286,7 @@ export class Responder {
       }
       if (typeof newest.message_id !== 'string' || newest.message_id === '') {
         this.revisit.delete(where)
-        this.log.warn('message_id_missing', { thread_id: row.thread_id })
+        this.log.warn('message_id_missing', ids)
         return
       }
       const key = replyKey(accountId, row.contact_fpr, newest.message_id)
@@ -252,18 +300,54 @@ export class Responder {
         this.log.info('agent_turn_cap', { thread_id: row.thread_id, turns })
         return
       }
-      await this.attempt(key, where, { thread_id: row.thread_id }, async () => {
-        const text = await this.write(contact, threadPrompt(messages))
-        await this.node.sendToContact({
-          account_id: accountId,
-          contact_fpr: row.contact_fpr,
-          thread_id: row.thread_id,
-          msg_id: key,
-          text,
-        })
-        this.log.info('replied', { thread_id: row.thread_id, msg_id: key })
+      const ask = asks.find((a) => a.for_message_id === newest.message_id)
+      const allowed = ask ? AFTER_ASK_TURNS : FIRST_TURNS
+      await this.attempt(key, where, ids, async () => {
+        const turn = await this.write(contact, threadPrompt(messages, schema, allowed, ask), allowed)
+        const surface = { account_id: accountId, thread_id: row.thread_id, for_message_id: newest.message_id }
+        const send = (text: string) =>
+          this.node.sendToContact({ account_id: accountId, contact_fpr: row.contact_fpr, thread_id: row.thread_id, msg_id: key, text })
+        switch (turn.type) {
+          case 'reply':
+            await send(turn.text)
+            this.log.info('replied', { thread_id: row.thread_id, msg_id: key })
+            return 'done'
+          case 'ask':
+            // The ids last: a surface schema that let them through would not move the ask elsewhere.
+            await this.node.askOwner({ ...turn.ask, ...surface })
+            this.waiting.set(where, true)
+            this.log.info('asked', ids)
+            return 'waiting'
+          case 'notify':
+            if (turn.reply !== undefined) {
+              await send(turn.reply)
+              this.log.info('replied', { thread_id: row.thread_id, msg_id: key })
+            }
+            this.owed.set(where, { key, args: { ...turn.notice, ...surface } })
+            await this.deliver(where, ids)
+            return 'done'
+          case 'none':
+            this.log.info('no_reply', ids)
+            return 'done'
+        }
       })
     })
+  }
+
+  /**
+   * Puts the notice a thread owes, if it owes one, under attempts of its own. It is kept until
+   * notify_owner takes it or its attempts run out.
+   */
+  private async deliver(where: string, ids: Record<string, string>): Promise<void> {
+    const owed = this.owed.get(where)
+    if (!owed) return
+    const key = `notice\0${owed.key}`
+    await this.attempt(key, null, ids, async () => {
+      await this.node.notifyOwner(owed.args)
+      this.log.info('notified', ids)
+      return 'done'
+    })
+    if (this.done.has(key) || (this.attempts.get(key) ?? 0) >= MAX_ATTEMPTS) this.owed.delete(where)
   }
 
   async answerRequest(accountId: string, row: PendingRequest): Promise<void> {
@@ -279,20 +363,23 @@ export class Responder {
         this.log.info('contact_budget', { request_id: row.ID })
         return
       }
+      const schema = await this.turns.schema()
       await this.attempt(key, null, { request_id: row.ID }, async () => {
-        const result = await this.write(contact, requestPrompt(row))
-        await this.node.answerRequest({ account_id: accountId, request_id: row.ID, result })
+        const turn = (await this.write(contact, requestPrompt(row, schema), ['reply'])) as Extract<Turn, { type: 'reply' }>
+        await this.node.answerRequest({ account_id: accountId, request_id: row.ID, result: turn.text })
         this.log.info('answered', { request_id: row.ID })
+        return 'done'
       })
     })
   }
 
   /**
-   * The model's text for a prompt, counted against the contact's budget; a failure or an empty text
-   * is a refusal named draft. The budget was checked before the work began, and is checked again
-   * here, where it is spent, for drafts of one contact that ran side by side.
+   * The model's turn for a prompt, counted against the contact's budget; a failure, an empty answer
+   * or one that is not an allowed turn is a refusal named draft. The budget was checked before the
+   * work began, and is checked again here, where it is spent, for drafts of one contact that ran
+   * side by side.
    */
-  private async write(contact: string, prompt: string): Promise<string> {
+  private async write(contact: string, prompt: string, allowed: readonly TurnType[]): Promise<Turn> {
     if (!this.budget.take(contact)) throw new NodeRefusal('draft', 'contact_budget')
     let text: string
     try {
@@ -301,15 +388,19 @@ export class Responder {
       throw new NodeRefusal('draft', 'model_failed')
     }
     if (!text) throw new NodeRefusal('draft', 'empty')
-    return text
+    return this.turns.read(text, allowed)
   }
 
-  /** Runs one attempt for a key, counting it, and keeps the thread to revisit while attempts remain. */
+  /**
+   * Runs one attempt for a key, counting it, and keeps the thread to revisit while attempts remain.
+   * Work that ends 'waiting' (an ask put) leaves the key unanswered, for the thread to be drafted
+   * for again once the ask is no longer open.
+   */
   private async attempt(
     key: string,
     where: string | null,
     ids: Record<string, string>,
-    work: () => Promise<void>,
+    work: () => Promise<'done' | 'waiting'>,
   ): Promise<void> {
     const n = (this.attempts.get(key) ?? 0) + 1
     if (n > MAX_ATTEMPTS) {
@@ -318,8 +409,7 @@ export class Responder {
     }
     this.attempts.set(key, n)
     try {
-      await work()
-      this.done.set(key, true)
+      if ((await work()) === 'done') this.done.set(key, true)
       this.attempts.delete(key)
       if (where) this.revisit.delete(where)
     } catch (e) {

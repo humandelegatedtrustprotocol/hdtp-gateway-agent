@@ -2,8 +2,9 @@
 // node's does (internal/internalui/ownermcp/server.go), held in memory.
 
 import { createHmac } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import type { Log } from '../src/hdtp/log.ts'
-import type { PendingRequest, ThreadMessage } from '../src/hdtp/node.ts'
+import { NodeRefusal, type JsonSchema, type OwnerAsk, type PendingRequest, type ThreadMessage } from '../src/hdtp/node.ts'
 import type { Rules } from '../src/hdtp/responder.ts'
 import { DEFAULT_AGENT_TURN_CAP, DEFAULT_REPLIES_PER_HOUR } from '../src/hdtp/config.ts'
 
@@ -32,6 +33,30 @@ export function rules(over: Partial<Rules> = {}): Rules {
     ...over,
   }
 }
+
+/** The node's tools/list for the tools this agent calls (test/wire.ts says where each was captured). */
+export const TOOLS = JSON.parse(readFileSync(new URL('./owner-mcp-tools.json', import.meta.url), 'utf8')) as Array<{
+  name: string
+  inputSchema: JsonSchema
+}>
+
+/** The model's answers, as the turn schema has them. */
+export const reply = (text: string) => JSON.stringify({ type: 'reply', text })
+export const none = () => JSON.stringify({ type: 'none' })
+/** An ask's surface in the catalog test/owner-mcp-tools.json holds: a TLDR, terms, ready replies, write-my-own last. */
+export function surface(tldr: string, terms: Record<string, string>, choices: string[] = []): Array<Record<string, unknown>> {
+  const parts: Array<Record<string, unknown>> = [
+    { id: 'tldr', component: 'Text', text: tldr },
+    { id: 'terms', component: 'KeyValue', items: Object.entries(terms).map(([key, value]) => ({ key, value })) },
+    ...choices.map((text, i) => ({ id: `choice-${i}`, component: 'Choice', label: text.slice(0, 80), text })),
+  ]
+  if (choices.length) parts.push({ id: 'own', component: 'TextField', label: 'Write my own' })
+  return [{ id: 'root', component: 'Column', children: parts.map((c) => c.id) }, ...parts]
+}
+export const ask = (tldr: string, terms: Record<string, string>, choices: string[]) =>
+  JSON.stringify({ type: 'ask', ask: { components: surface(tldr, terms, choices) } })
+export const notify = (tldr: string, terms: Record<string, string>, text?: string) =>
+  JSON.stringify({ type: 'notify', notice: { components: surface(tldr, terms) }, ...(text === undefined ? {} : { reply: text }) })
 
 export function memoryLog(): Log & { lines: Array<{ code: string; fields?: Record<string, unknown> }> } {
   const lines: Array<{ code: string; fields?: Record<string, unknown> }> = []
@@ -86,6 +111,13 @@ export class FakeNode {
   trust = new Map<string, string>()
   /** Tools that answer the refusal `internal`. */
   failing = new Set<string>()
+  /** The asks put with ask_owner, and the notices put with notify_owner, as the node holds them. */
+  asks: Array<OwnerAsk & { account: string; components: unknown }> = []
+  notices: Array<{ account: string; thread_id: string; for_message_id: string; components: unknown }> = []
+  /** How many of the next ask_owner calls answer `invalid`, as the node does for a surface outside its catalog. */
+  invalidSurfaces = 0
+  /** Tools tools/list does not offer, as an older node would not. */
+  unlisted = new Set<string>()
   private clock = 1_760_000_000
   /** The change log wait_for_updates reads, as the node's: ids in order, a kind, a thread. */
   private changes: Array<{ id: number; account: string; thread_id?: string; pending?: boolean }> = []
@@ -144,6 +176,34 @@ export class FakeNode {
   private stamp(): { message_id: string; created_at: number } {
     const at = ++this.clock
     return { message_id: `msg-${at}`, created_at: at }
+  }
+
+  /** A tool's input schema, as the node's tools/list gives it. */
+  toolSchema = async (name: string): Promise<JsonSchema> => {
+    const tool = TOOLS.find((t) => t.name === name)
+    if (!tool || this.unlisted.has(name)) throw new NodeRefusal(name, 'tool_not_offered')
+    return structuredClone(tool.inputSchema)
+  }
+
+  /**
+   * The owner answers an ask in the portal: a ready reply or their own words are sent to the
+   * contact as the owner's message, labelled human; `send: false` answers it with no message.
+   */
+  answerAsk(id: string, text: string, send = true): void {
+    const a = this.asks.find((x) => x.id === id)
+    if (!a || a.status !== 'open') throw new Error('no open ask')
+    a.status = 'answered'
+    a.answer_text = text
+    if (send) this.outbound(a.thread_id, text, 'human')
+    else this.change(a.account, { thread_id: a.thread_id })
+  }
+
+  /** An ask's 24 hours run out. */
+  expireAsk(id: string): void {
+    const a = this.asks.find((x) => x.id === id)
+    if (!a || a.status !== 'open') throw new Error('no open ask')
+    a.status = 'expired'
+    this.change(a.account, { thread_id: a.thread_id })
   }
 
   trustOf(fpr: string): string {
@@ -233,6 +293,37 @@ export class FakeNode {
         this.answered.push({ request_id: args.request_id as string, result: args.result as string })
         return ok({ relayed: true })
       }
+      case 'ask_owner': {
+        const th = this.threads.get(args.thread_id as string)
+        if (!th || th.account !== acct) return refusal('not_found')
+        // Idempotent on for_message_id: the ask already put for that message answers, whatever its status.
+        const same = this.asks.find((a) => a.account === acct && a.thread_id === args.thread_id && a.for_message_id === args.for_message_id)
+        if (same) return ok({ id: same.id, status: same.status })
+        if (this.asks.some((a) => a.account === acct && a.thread_id === args.thread_id && a.status === 'open')) return refusal('conflict')
+        if (this.invalidSurfaces > 0) {
+          this.invalidSurfaces--
+          return refusal('invalid')
+        }
+        const id = `ask-${this.asks.length + 1}`
+        this.asks.push({ id, account: acct, thread_id: args.thread_id as string, for_message_id: args.for_message_id as string, status: 'open', components: args.components })
+        this.change(acct, { thread_id: args.thread_id as string })
+        return ok({ id, status: 'open' })
+      }
+      case 'notify_owner': {
+        const th = this.threads.get(args.thread_id as string)
+        if (!th || th.account !== acct) return refusal('not_found')
+        const same = this.notices.some((n) => n.account === acct && n.thread_id === args.thread_id && n.for_message_id === args.for_message_id)
+        if (!same) {
+          this.notices.push({ account: acct, thread_id: args.thread_id as string, for_message_id: args.for_message_id as string, components: args.components })
+        }
+        return ok({ status: 'posted' })
+      }
+      case 'list_asks':
+        return ok(
+          this.asks
+            .filter((a) => a.account === acct && (args.thread_id === undefined || a.thread_id === args.thread_id))
+            .map(({ account: _a, components: _c, ...row }) => row),
+        )
       case 'wait_for_updates':
         this.waits.push({ account: acct, since: args.since as number | undefined })
         return this.waitAnswer ?? this.wait(acct, args.since as number | undefined)

@@ -5,6 +5,7 @@
 // send_to_contact's result in Go's field names, which carry no json tags. A refusal is a tool
 // error whose text is {"code", "detail"}; only the code is kept.
 
+import { standardSchemaToJSONSchema } from '@mastra/core/schema'
 import type { ToolExecutionContext } from '@mastra/core/tools'
 import { MCPClient } from '@mastra/mcp'
 
@@ -63,6 +64,26 @@ export interface AnswerArgs {
   result: string
 }
 
+/** A tool's input schema, as the node lists it in tools/list. */
+export type JsonSchema = Record<string, unknown>
+
+/**
+ * One ask this agent put to the owner, the fields it reads (list_asks rows). An ask is open until
+ * the owner answers it, the agent withdraws it, or it expires.
+ */
+export interface OwnerAsk {
+  id: string
+  thread_id: string
+  /** The contact's message the ask was raised for. */
+  for_message_id: string
+  status: string // open, answered, withdrawn, expired
+  /** The owner's answer as one line of text, once answered. */
+  answer_text?: string
+}
+
+/** ask_owner's and notify_owner's arguments: the ids code fills, and the surface the model wrote. */
+export type SurfaceArgs = Record<string, unknown> & { account_id: string; thread_id: string; for_message_id: string }
+
 /**
  * One answer of wait_for_updates, the fields this agent reads (ownermcp watch.go, waitResult).
  * The node holds the call until something moves for the account or up to 25 s, then answers.
@@ -91,6 +112,14 @@ export interface NodeClient {
   answerRequest(args: AnswerArgs): Promise<void>
   /** Omitting `since` starts from now: the node answers at once with a cursor and no backlog. */
   waitForUpdates(accountId: string, since: number | undefined, signal?: AbortSignal): Promise<WaitAnswer>
+  /** An ask for the owner, idempotent on for_message_id. */
+  askOwner(args: SurfaceArgs): Promise<void>
+  /** A notice for the owner, idempotent on for_message_id. */
+  notifyOwner(args: SurfaceArgs): Promise<void>
+  /** The asks of a thread, every status. */
+  listAsks(accountId: string, threadId: string): Promise<OwnerAsk[]>
+  /** A tool's input schema as the node lists it; tool_not_offered for a tool it does not list. */
+  toolSchema(name: string): Promise<JsonSchema>
 }
 
 /** A tool error from the node, by its code. */
@@ -137,8 +166,10 @@ export function decodeAnswer(tool: string, answer: ToolAnswer): unknown {
   return value
 }
 
-/** A NodeClient over any way of calling a tool by name. */
-export function nodeClientOver(call: CallTool): NodeClient {
+type ToolSchema = (name: string) => Promise<JsonSchema>
+
+/** A NodeClient over any way of calling a tool by name and of reading a tool's input schema. */
+export function nodeClientOver(call: CallTool, toolSchema: ToolSchema): NodeClient {
   const json = async (tool: string, args: Record<string, unknown>, signal?: AbortSignal) =>
     decodeAnswer(tool, await call(tool, args, signal))
   return {
@@ -186,6 +217,16 @@ export function nodeClientOver(call: CallTool): NodeClient {
       }
       return answer as WaitAnswer
     },
+    async askOwner(args) {
+      await json('ask_owner', { ...args })
+    },
+    async notifyOwner(args) {
+      await json('notify_owner', { ...args })
+    },
+    async listAsks(accountId, threadId) {
+      return ((await json('list_asks', { account_id: accountId, thread_id: threadId })) as OwnerAsk[] | null) ?? []
+    },
+    toolSchema,
   }
 }
 
@@ -214,18 +255,31 @@ export function connectNode(url: string, token: string): { node: NodeClient; dis
     }
     return toolsets.hdtp ?? {}
   }
-  const call: CallTool = async (name, args, signal) => {
+  const offered = async (name: string) => {
     try {
-      const set = await (tools ??= list())
-      const tool = set[name]
+      const tool = (await (tools ??= list()))[name]
       if (!tool?.execute) throw new NodeRefusal(name, 'tool_not_offered')
-      // Called by code, outside any agent run: the MCP tool reads only the context's optional members,
-      // and hands abortSignal to the request, so stopping a held wait ends it.
-      return (await tool.execute(args, { abortSignal: signal } as ToolExecutionContext)) as ToolAnswer
+      return tool
     } catch (e) {
       tools = null
       throw e instanceof NodeRefusal ? e : new NodeRefusal(name, 'node_unreachable')
     }
   }
-  return { node: nodeClientOver(call), disconnect: () => mcp.disconnect() }
+  const toolSchema: ToolSchema = async (name) => {
+    const tool = await offered(name)
+    // The client keeps the listed JSON Schema behind a standard schema; this reads it back.
+    return standardSchemaToJSONSchema(tool.inputSchema as Parameters<typeof standardSchemaToJSONSchema>[0]) as JsonSchema
+  }
+  const call: CallTool = async (name, args, signal) => {
+    const tool = await offered(name)
+    try {
+      // Called by code, outside any agent run: the MCP tool reads only the context's optional members,
+      // and hands abortSignal to the request, so stopping a held wait ends it.
+      return (await tool.execute!(args, { abortSignal: signal } as ToolExecutionContext)) as ToolAnswer
+    } catch (e) {
+      tools = null
+      throw e instanceof NodeRefusal ? e : new NodeRefusal(name, 'node_unreachable')
+    }
+  }
+  return { node: nodeClientOver(call, toolSchema), disconnect: () => mcp.disconnect() }
 }
