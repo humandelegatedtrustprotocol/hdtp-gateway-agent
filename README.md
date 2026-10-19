@@ -213,12 +213,17 @@ container), the persona's path and the owner MCP's address over what `agent.env`
   with the `up -d` above: recreating `agent` alone leaves the forwarder joined to the old container,
   and the agent logs `reconcile_failed` (`connect:node_unreachable`) until the next `up -d`.
 - **Who reaches port 4111.** It is published nowhere. A connection from anywhere but the container's
-  own loopback interface reaches only the routes Mastra declares public: `POST /hdtp/webhook`, whose
-  signature is checked, and Mastra's `/api/auth/*` routes, which do nothing without an auth provider
-  (`/api/auth/capabilities` answers `{"enabled":false,"login":null}`). Every other request is refused
-  with 403 `{"code":"peer_refused"}`, whatever Host it names: `/api/agents`,
-  `/api/agents/delegate/generate`, `/` and `/health` among them. Mastra's `/api` routes ask for no
-  credential, so they answer a caller inside the agent's container only, through `docker exec`.
+  own loopback interface is refused with 403 `{"code":"peer_refused"}`, whatever Host it names, on
+  every route but the ones Mastra declares public (it runs no middleware on those):
+  - `POST /hdtp/webhook`, whose signature is checked;
+  - Mastra's eight `/api/auth/*` routes. With no auth provider, as here, they carry nothing of the
+    agent's: `/api/auth/capabilities` answers `{"enabled":false,"login":null}`, `/api/auth/me` answers
+    `null`, `/api/auth/sso/callback` redirects with `?error=sso_not_configured`, and the other five
+    answer 404 "… not configured". `test/peer.test.ts` holds each of them to that answer, and turns
+    red if Mastra adds a public route.
+
+  Mastra's `/api` routes ask for no credential, so they answer a caller inside the agent's network
+  namespace only: `docker exec`, or a container started with `--network container:<the agent>`.
 
 Work in progress: the full README follows.
 
