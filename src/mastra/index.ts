@@ -10,6 +10,7 @@ import { registerApiRoute } from '@mastra/core/server'
 import { readConfig } from '../hdtp/config.ts'
 import { receive, startRuntime } from '../hdtp/runtime.ts'
 import { delegate } from './agents/delegate.ts'
+import { STUDIO_ORIGINS, studioWritesOnly } from './origins.ts'
 
 // A statement, not a binding the `server` option refers to: see src/hdtp/runtime.ts.
 startRuntime(readConfig(), delegate)
@@ -19,8 +20,10 @@ export const mastra = new Mastra({
   server: {
     host: '127.0.0.1',
     // Studio's two addresses only, not Mastra's default `*`: a page of any other origin is given no
-    // Access-Control-Allow-Origin, so the browser keeps the answer from it.
-    cors: { origin: ['http://localhost:4111', 'http://127.0.0.1:4111'] },
+    // Access-Control-Allow-Origin, so the browser keeps the answer from it, and its writes are
+    // refused (origins.ts).
+    cors: { origin: STUDIO_ORIGINS },
+    middleware: studioWritesOnly,
     apiRoutes: [
       registerApiRoute('/hdtp/webhook', {
         method: 'POST',

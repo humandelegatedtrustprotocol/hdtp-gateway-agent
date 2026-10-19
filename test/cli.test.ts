@@ -3,7 +3,8 @@
 // `mastra dev` reads the entry file's `server` option in its own process: it bundles that option,
 // and whatever it references, into a module and imports it there before it starts the served
 // process. The first tests run the real `mastra dev`: they count the runtimes that reach the node,
-// by their sweeps and by their wait_for_updates loops, and read the CORS answers of its /api.
+// by their sweeps and by their wait_for_updates loops, and read the CORS answers of its /api and
+// its refusal of a write from another origin.
 // The last imports the entry file and reads the server config the served process binds with
 // (createNodeServer binds `mastra.getServer().host`, else MASTRA_HOST).
 //
@@ -141,6 +142,47 @@ describe('the served process under `mastra dev`', () => {
         })
         expect(allowed(pre), origin).toBeNull()
       }
+    }))
+
+  it("refuses a write from any other origin, in the bodies a browser sends with no preflight, and takes Studio's", () =>
+    showing(async () => {
+      const api = `http://127.0.0.1:${port}/api/agents/delegate`
+      const model = async () => {
+        const a = (await (await fetch(api)).json()) as { provider: string; modelId: string }
+        return `${a.provider}/${a.modelId}`
+      }
+      const before = await model()
+      const change = { provider: 'openrouter', modelId: 'cross-origin/probe' }
+      const form = () => {
+        const f = new FormData()
+        for (const [k, v] of Object.entries(change)) f.append(k, v)
+        return f
+      }
+      for (const origin of ['https://example.com', 'http://localhost:4199', 'null']) {
+        // A multipart form, and text/plain whose content type names JSON in a parameter: Mastra
+        // reads both as the body, and a browser sends both without asking first.
+        for (const init of [
+          { body: form() },
+          { body: JSON.stringify(change), headers: { 'Content-Type': 'text/plain; a=application/json' } },
+        ]) {
+          const res = await fetch(`${api}/model`, { method: 'POST', ...init, headers: { ...init.headers, Origin: origin } })
+          expect(res.status, origin).toBe(403)
+          expect(await res.json()).toEqual({ code: 'origin_refused' })
+        }
+        expect(await model(), origin).toBe(before)
+      }
+      // Studio's own writes go through, from both of its addresses.
+      const studio = { 'Content-Type': 'application/json' }
+      const set = await fetch(`${api}/model`, {
+        method: 'POST',
+        headers: { ...studio, Origin: 'http://localhost:4111' },
+        body: JSON.stringify({ provider: 'openrouter', modelId: 'studio/choice' }),
+      })
+      expect(set.status).toBe(200)
+      expect(await model()).toBe('openrouter/studio/choice')
+      const reset = await fetch(`${api}/model/reset`, { method: 'POST', headers: { ...studio, Origin: 'http://127.0.0.1:4111' }, body: '{}' })
+      expect(reset.status).toBe(200)
+      expect(await model()).toBe(before)
     }))
 })
 
