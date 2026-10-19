@@ -1,8 +1,9 @@
 // Answering the node's contacts: one reply per newest inbound message, one answer per request.
 //
-// A webhook names a thread or a request; reconciling walks list_pending and get_inbox. Threads end
-// in answerThread, which replies only when the thread's newest message is the contact's, under a
-// msg_id derived from that message. The node records one row per (account, contact, direction,
+// A webhook names a thread or a request; reconciling walks list_pending and get_inbox, over every
+// account for a sweep and over one when the wait_for_updates loop (watch.ts) says something moved
+// in it. Threads end in answerThread, which replies only when the thread's newest message is the
+// contact's, under a msg_id derived from that message. The node records one row per (account, contact, direction,
 // msg_id); a replay writes nothing and answers the original row's result
 // (messaging.Service.Record), so a webhook and a reconcile pass, or two processes, that both reach
 // one message record one reply.
@@ -106,25 +107,33 @@ export class Responder {
   }
 
   /**
-   * One pass over every account: its open requests first, since a caller is waiting on each, then
+   * One pass over every account. `listed`, when given, is handed the accounts before the pass
+   * works through them.
+   */
+  async reconcile(listed?: (accounts: string[]) => void): Promise<void> {
+    const accounts = await this.node.listAccounts()
+    listed?.(accounts)
+    for (const accountId of accounts) await this.reconcileAccount(accountId)
+  }
+
+  /**
+   * One pass over one account: its open requests first, since a caller is waiting on each, then
    * its unread threads and the threads a failure left to revisit. A section that fails is logged
    * by code and the pass goes on, so a failing list_pending does not keep threads unanswered.
    */
-  async reconcile(): Promise<void> {
-    for (const accountId of await this.node.listAccounts()) {
-      await this.section('list_pending', async () => {
-        for (const row of await this.node.listPending(accountId)) {
-          await this.answerRequest(accountId, row)
+  async reconcileAccount(accountId: string): Promise<void> {
+    await this.section('list_pending', async () => {
+      for (const row of await this.node.listPending(accountId)) {
+        await this.answerRequest(accountId, row)
+      }
+    })
+    await this.section('get_inbox', async () => {
+      for (const row of await this.node.getInbox(accountId)) {
+        if (row.unread > 0 || this.revisit.has(`${accountId}\0${row.thread_id}`)) {
+          await this.answerThread(accountId, row)
         }
-      })
-      await this.section('get_inbox', async () => {
-        for (const row of await this.node.getInbox(accountId)) {
-          if (row.unread > 0 || this.revisit.has(`${accountId}\0${row.thread_id}`)) {
-            await this.answerThread(accountId, row)
-          }
-        }
-      })
-    }
+      }
+    })
   }
 
   private async section(name: string, work: () => Promise<void>): Promise<void> {

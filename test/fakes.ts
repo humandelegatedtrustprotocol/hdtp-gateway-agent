@@ -48,8 +48,15 @@ export class FakeNode {
   accounts = ['acct-1']
   threads = new Map<string, Thread>()
   pending: PendingRequest[] = []
-  /** Every tool called, in order. */
+  /** Every tool called, in order, and the clock (Date.now()) at each call. */
   calls: string[] = []
+  at: number[] = []
+  /** Each wait_for_updates call, in order: its account and its `since`, undefined where omitted. */
+  waits: Array<{ account: string; since: number | undefined }> = []
+  /** How long wait_for_updates holds a call when nothing moves: the node's 25 s. */
+  holdMs = 25_000
+  /** Set to make the next wait_for_updates answer that its cursor expired. */
+  expireNext = false
   /** Messages recorded outbound, one per msg_id, as the node records them. */
   sent: Array<{ account_id: string; contact_fpr: string; thread_id: string; msg_id: string; text: string }> = []
   answered: Array<{ request_id: string; result: string }> = []
@@ -58,6 +65,58 @@ export class FakeNode {
   /** Tools that answer the refusal `internal`. */
   failing = new Set<string>()
   private clock = 1_760_000_000
+  /** The change log wait_for_updates reads, as the node's: ids in order, a kind, a thread. */
+  private changes: Array<{ id: number; account: string; thread_id?: string; pending?: boolean }> = []
+  private woken: Array<() => void> = []
+
+  private change(account: string, c: { thread_id?: string; pending?: boolean }): void {
+    this.changes.push({ id: this.changes.length + 1, account, ...c })
+    for (const wake of this.woken.splice(0)) wake()
+  }
+
+  /** An agent-answered call waiting for an answer, as the node records one (an EventPending change). */
+  request(id: string, account = 'acct-1'): void {
+    this.pending.push({ ID: id, ContactFpr: 'fpr-contact', Capability: 'ask_alex', Args: '{}', Status: 'open', ExpiresAt: 0 })
+    this.change(account, { pending: true })
+  }
+
+  /** What moved for an account after `since`: the wait's answer, or null when nothing did. */
+  private movedSince(account: string, since: number) {
+    const newest = this.changes.length
+    const rows = this.changes.filter((c) => c.account === account && c.id > since)
+    if (rows.length === 0) return null
+    const threads = [...new Set(rows.flatMap((c) => (c.thread_id ? [c.thread_id] : [])))].map((thread_id) => ({ thread_id }))
+    return { cursor: newest, threads: threads.length ? threads : null, timed_out: false }
+  }
+
+  /** wait_for_updates as watch.go answers it, holding for holdMs when nothing moved. */
+  private async wait(account: string, since: number | undefined): Promise<ToolAnswer> {
+    const counts = () => ({
+      contact_requests: 0,
+      pending_addresses: 0,
+      pending_requests: this.pending.filter((p) => p.Status === 'open').length,
+    })
+    if (since === undefined) return ok({ cursor: this.changes.length, threads: null, ...counts(), timed_out: false })
+    if (this.expireNext || since > this.changes.length) {
+      this.expireNext = false
+      return ok({ cursor: this.changes.length, cursor_expired: true, threads: null, ...counts(), timed_out: false })
+    }
+    const end = Date.now() + this.holdMs
+    for (;;) {
+      const moved = this.movedSince(account, since)
+      if (moved) return ok({ ...moved, ...counts() })
+      const left = end - Date.now()
+      if (left <= 0) return ok({ cursor: this.changes.length, threads: null, ...counts(), timed_out: true })
+      await new Promise<void>((r) => {
+        const t = setTimeout(r, left)
+        t.unref?.()
+        this.woken.push(() => {
+          clearTimeout(t)
+          r()
+        })
+      })
+    }
+  }
 
   thread(id: string, contact = 'fpr-contact', status = 'active', account = 'acct-1'): void {
     this.threads.set(id, { account, contact_fpr: contact, contact_status: status, messages: [], readThrough: 0 })
@@ -68,6 +127,7 @@ export class FakeNode {
     const th = this.threads.get(threadId)
     if (!th) throw new Error('no thread')
     th.messages.push({ direction: 'in', sender, kind: 'text', body, trust: 'messages_only', created_at: ++this.clock })
+    this.change(th.account, { thread_id: threadId })
   }
 
   /** A message from this side: the owner in the portal ('human') or an agent ('agent'). */
@@ -76,11 +136,13 @@ export class FakeNode {
     if (!th) throw new Error('no thread')
     th.messages.push({ direction: 'out', sender, kind: 'text', body, trust: 'messages_only', created_at: ++this.clock })
     th.readThrough = th.messages.length
+    this.change(th.account, { thread_id: threadId })
   }
 
   /** One tool call, answered as the node answers it. */
   call = async (name: string, args: Record<string, unknown>): Promise<ToolAnswer> => {
     this.calls.push(name)
+    this.at.push(Date.now())
     if (this.failing.has(name)) return refusal('internal')
     const acct = args.account_id as string
     if (name !== 'list_accounts' && !this.accounts.includes(acct)) return { isError: true, content: [{ type: 'text', text: '{"code":"permission_denied"}' }] }
@@ -115,6 +177,7 @@ export class FakeNode {
           this.sent.push(args as (typeof this.sent)[number])
           th.messages.push({ direction: 'out', sender: 'agent', kind: 'text', body: args.text as string, trust: 'messages_only', created_at: ++this.clock })
           th.readThrough = th.messages.length
+          this.change(acct, { thread_id: args.thread_id as string })
         }
         if (this.undelivered) return refusal('unavailable', { ThreadID: args.thread_id, Status: 'pending' })
         return ok({ ThreadID: args.thread_id, Status: 'pending' })
@@ -129,6 +192,9 @@ export class FakeNode {
         this.answered.push({ request_id: args.request_id as string, result: args.result as string })
         return ok({ relayed: true })
       }
+      case 'wait_for_updates':
+        this.waits.push({ account: acct, since: args.since as number | undefined })
+        return this.wait(acct, args.since as number | undefined)
       default:
         return refusal('not_found')
     }

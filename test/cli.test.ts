@@ -2,7 +2,8 @@
 //
 // `mastra dev` reads the entry file's `server` option in its own process: it bundles that option,
 // and whatever it references, into a module and imports it there before it starts the served
-// process. The first test runs the real `mastra dev` and counts the runtimes that reach the node.
+// process. The first test runs the real `mastra dev` and counts the runtimes that reach the node,
+// by their sweeps and by their wait_for_updates loops.
 // The second imports the entry file and reads the server config the served process binds with
 // (createNodeServer binds `mastra.getServer().host`, else MASTRA_HOST).
 //
@@ -59,8 +60,10 @@ describe("the CLI's reading of the entry file", () => {
           return false
         }
       }, 90_000)
-      // Each runtime sweeps the moment it starts; give a second one the time to reach the node.
+      // Each runtime sweeps the moment it starts, and its loop's first wait omits the cursor; give
+      // a second one the time to reach the node.
       await new Promise((r) => setTimeout(r, 2_000))
+      expect(node.waits.filter((w) => w.since === undefined)).toEqual([{ account: 'acct-1', since: undefined }])
       expect(node.calls.filter((c) => c === 'list_accounts')).toHaveLength(1)
     } finally {
       try {

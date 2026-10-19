@@ -11,7 +11,11 @@ import { TOKEN, serve } from './wire.ts'
 describe('a started runtime', () => {
   const node = new FakeNode()
   let close = () => Promise.resolve()
-  afterAll(() => close())
+  let stop = () => {}
+  afterAll(() => {
+    stop()
+    return close()
+  })
 
   it('stops at the HDTP_AGENT_TURN_CAP it was configured with', async () => {
     node.thread('th1')
@@ -19,12 +23,15 @@ describe('a started runtime', () => {
     node.outbound('th1', 'our agent', 'agent')
     node.inbound('th1', 'their agent again', 'agent')
     const { server, url } = await serve(node)
-    close = () => new Promise<void>((r) => server.close(() => r()))
+    close = () => {
+      server.closeAllConnections()
+      return new Promise<void>((r) => server.close(() => r()))
+    }
     let drafts = 0
     const agent = { generate: async () => (drafts++, { text: 'reply' }) } as unknown as Agent
     const log = memoryLog()
     const config = readConfig({ HDTP_OWNER_MCP_URL: url, HDTP_OWNER_TOKEN: TOKEN, HDTP_AGENT_TURN_CAP: '1', HDTP_RECONCILE_SECONDS: '3600' })
-    startRuntime(config, agent, log)
+    stop = startRuntime(config, agent, log)
     // The sweep at start reads the thread, then stops at one turn.
     for (let i = 0; i < 100 && !log.lines.some((l) => l.code === 'agent_turn_cap'); i++) {
       await new Promise((r) => setTimeout(r, 20))
@@ -32,5 +39,14 @@ describe('a started runtime', () => {
     expect(log.lines.find((l) => l.code === 'agent_turn_cap')?.fields).toEqual({ thread_id: 'th1', turns: 1 })
     expect(drafts).toBe(0)
     expect(node.sent).toEqual([])
+  })
+
+  it('holds a wait_for_updates loop for each account the sweep listed', async () => {
+    for (let i = 0; i < 100 && node.waits.length < 2; i++) await new Promise((r) => setTimeout(r, 20))
+    // The first wait starts from now; the second waits from the cursor the first answered.
+    expect(node.waits.slice(0, 2)).toEqual([
+      { account: 'acct-1', since: undefined },
+      { account: 'acct-1', since: expect.any(Number) },
+    ])
   })
 })

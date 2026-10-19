@@ -130,10 +130,44 @@ and in agent mode the node calls the upstream only as a fallback (`AgentAnswered
 from the code).
 
 The call came 23 s after the agent's last owner-MCP request. The node counts the owner's agent as
-attached only while its last request is under a minute old (`presence.Window`). This agent sweeps
-every `HDTP_RECONCILE_SECONDS` and does not hold a `wait_for_updates` loop. A call more than about a
-minute after a sweep would therefore find the agent absent and fall back at once (`no_agent`). That
-is read from the code; this run did not show it.
+attached only while its last request is under a minute old (`presence.Window`). The agent at
+8cda5be swept every `HDTP_RECONCILE_SECONDS` and held no `wait_for_updates` loop. A call that came
+more than a minute after its last request would therefore find the agent absent and fall back at
+once (`no_agent`). That was read from the code; this run did not show it. The next section does.
+
+## (d), later: the presence gap, shown and fixed (2026-10-19, issue #17)
+
+Run on the same two nodes, at hdtp-gateway 2170fda, with copies of their data. The portals and
+owner MCPs were on ports of their own. Ana's webhook was moved to a port of its own, through her
+portal's Webhooks page. Both runs set `HDTP_RECONCILE_SECONDS=300`, so the gap was longer than the
+node's minute. At the default of 60 s, the gap is read from the code, not observed. The node keeps
+the last request in whole seconds, and writes it at most once every 5 s (`presence.SeenEvery`).
+When the sweep is the agent's only caller, the window closes less than about a second before the
+next sweep's first request. When another request (a webhook's, say) came in the 5 s before a
+sweep, that sweep's requests are not written, and the gap can reach about 6 s.
+
+- **Before** (the agent at 7759d02).
+  - The sweep ran at 109.
+  - Ben's call at 314.002 came 205 s after the agent's last request. It answered `unavailable` in
+    0.09 s.
+  - Ana's node audited `pending_fallback … why:no_agent` at 314.079.
+  - The webhook still reached the agent. Its answer at 319.620 was recorded `late`: nobody was
+    waiting for it any more.
+- **After** (the agent holding a `wait_for_updates` loop per account, `src/hdtp/watch.ts`).
+  - The sweep ran at 921.935. The node audited the loop's waits at 921.954 (the first answers at
+    once), 946.970, 971.990 and 997.002: one every 25.0 s.
+  - Ben's call at 999.046 came 77.1 s after the sweep. The agent's answer reached him at 1002.102,
+    after 3.06 s. The node audited `pending_relay ok` and no fallback.
+  - The held wait answered 1 ms after `pending_create`, and the webhook arrived 1 ms after that.
+    One draft answered both.
+- **After, webhook paused.** Ana's 4112 endpoint was then paused in her portal.
+  - Idle, the loop's waits ended 25.0 s apart, four in 100 s.
+  - Ben's call at 1100.841 came 178.9 s after the sweep. It was answered through the loop alone:
+    the wait ended 1 ms after `pending_create`, then `list_pending`, then the relay. Ben had the
+    answer at 1103.848, after 3.0 s. No webhook was sent.
+  - Stopping the agent (SIGTERM to `make dev`) ended its held wait on the node within 10 ms.
+
+Three model calls: the late answer before the fix, and one for each call after it.
 
 ## What it cost
 
