@@ -129,7 +129,7 @@ export function agentTurns(messages: readonly ThreadMessage[]): number {
  * The notice put for a contact's message whose turn was given up, so the owner learns it waits on
  * them: written here, never by the model, in the node's owner catalog (Column root, the TLDR Text).
  */
-export const GAVE_UP_TLDR = "Waiting on you: I could not prepare an answer to the contact's latest message in this thread."
+export const GAVE_UP_TLDR = 'Waiting on you: I could not prepare an answer to a message the contact sent here.'
 export const GAVE_UP_SURFACE = [
   { version: 'v0.9.1', createSurface: { surfaceId: 'gave-up', catalogId: 'https://hdtp.dev/a2ui/v0_9_1/catalogs/owner/catalog.json' } },
   {

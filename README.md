@@ -60,7 +60,7 @@ call failing, the hourly limit, the node unreachable) tells the retry nothing.
 
 When a contact's message is given up (`gave_up`, after 3 attempts), the owner is told: one notice
 on the thread, for that message, whose text the agent's code writes and the model never sees: "Waiting
-on you: I could not prepare an answer to the contact's latest message in this thread."
+on you: I could not prepare an answer to a message the contact sent here."
 (`gave_up_notified`). A notice the node does not take is logged by its code
 (`gave_up_notice_failed`, with `reason`) and not put again. A request given up has no thread to
 put a notice in, and gets none.
