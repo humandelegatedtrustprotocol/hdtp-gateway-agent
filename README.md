@@ -189,9 +189,9 @@ log lines.
 tagged `x.y.z` and `latest`, for linux/amd64 and linux/arm64, from a clean tree at the tag
 `vx.y.z` only; `PUSH=1` pushes both tags. It runs `mastra build`'s server with `node`, as the user
 `node`, with `MASTRA_TELEMETRY_DISABLED=1`. It has no Studio: `mastra build` bundles Studio only
-with `--studio`, so the image serves the webhook and Mastra's `/api` routes, on port 4111 of every
-interface of the container (`MASTRA_HOST=0.0.0.0`; outside the image the server binds 127.0.0.1
-unless `MASTRA_HOST` names another address).
+with `--studio`. The server listens on port 4111 of every interface of the container
+(`MASTRA_HOST=0.0.0.0`; outside the image it binds 127.0.0.1 unless `MASTRA_HOST` names another
+address).
 
 `compose.agent.yaml` adds the agent to the node's own compose project. In the directory of the node's
 `compose.yaml`, put `compose.agent.yaml`, an `agent.env` made from `.env.example` (the model's key,
@@ -212,11 +212,13 @@ container), the persona's path and the owner MCP's address over what `agent.env`
   dials the node's portal forwarder, which dials the node's loopback. Recreate the two together,
   with the `up -d` above: recreating `agent` alone leaves the forwarder joined to the old container,
   and the agent logs `reconcile_failed` (`connect:node_unreachable`) until the next `up -d`.
-- **Who reaches port 4111.** It is published nowhere, so nothing outside the compose project reaches
-  it. Inside the project, Mastra's `/api` routes ask for no credential, and the host rule is a
-  browser's defence only: a container of the project that names `127.0.0.1:4111` in its Host header is
-  answered, the persona and every trace included. The compose project is the boundary: run nothing in
-  it that you would not give the agent's model key and the owner's conversations.
+- **Who reaches port 4111.** It is published nowhere. A connection from anywhere but the container's
+  own loopback interface reaches only the routes Mastra declares public: `POST /hdtp/webhook`, whose
+  signature is checked, and Mastra's `/api/auth/*` routes, which do nothing without an auth provider
+  (`/api/auth/capabilities` answers `{"enabled":false,"login":null}`). Every other request is refused
+  with 403 `{"code":"peer_refused"}`, whatever Host it names: `/api/agents`,
+  `/api/agents/delegate/generate`, `/` and `/health` among them. Mastra's `/api` routes ask for no
+  credential, so they answer a caller inside the agent's container only, through `docker exec`.
 
 Work in progress: the full README follows.
 

@@ -1,5 +1,11 @@
-// The two addresses Studio is opened at, on the port this server binds, and the two rules that
-// keep every other page off this server. Studio and Mastra's /api routes ask for no credential.
+// The two addresses Studio is opened at, on the port this server binds, and the three rules that
+// keep every other caller off this server. Studio and Mastra's /api routes ask for no credential.
+//
+// The peer. Bound beyond the loopback interface (MASTRA_HOST=0.0.0.0, as in the image), the server
+// takes connections from other hosts: in a compose project, from every container on its network.
+// A request whose socket peer is not on the loopback interface is refused, whatever it names, so
+// from elsewhere only the public routes below answer. Studio and the API stay open to a caller on
+// the agent's own host or in its own container (`docker exec`).
 //
 // The host. A page whose own name its DNS later points at 127.0.0.1 (DNS rebinding) is of the same
 // origin as this server, so neither CORS nor the origin rule below keeps the answers from it: the
@@ -14,7 +20,8 @@
 // names an Origin that is not Studio's. A browser names the origin on every such request; one
 // without an Origin is not from a page (the node's webhook, curl), and goes through.
 //
-// Mastra runs no middleware on routes declared public, so neither rule reaches them:
+// Mastra runs no middleware on routes declared public (it wraps every middleware so), so none of
+// the three rules reaches them:
 // - /hdtp/webhook, whose signature is checked, so the node may name any host (http://agent:4111
 //   inside a compose project, say);
 // - Mastra's eight public auth routes, which do nothing without an auth provider (this agent has
@@ -57,6 +64,22 @@ export const STUDIO_HOSTS = studioHosts()
 export const STUDIO_ORIGINS = studioOrigins()
 
 const READS = new Set(['GET', 'HEAD', 'OPTIONS'])
+
+/** Whether a socket's peer address is the loopback interface's, as IPv4, IPv6 or IPv4 in IPv6. */
+export function loopbackPeer(address: string | undefined): boolean {
+  return address !== undefined && (address === '::1' || /^(::ffff:)?127\./i.test(address))
+}
+
+/**
+ * Refuses a request, of any method, whose socket peer is not on the loopback interface. The peer
+ * is the address the connection came from, which a request cannot name, as it names its Host. A
+ * request with no socket to read (not from Mastra's Node server) is refused too.
+ */
+export const loopbackPeersOnly: MiddlewareHandler = async (c, next) => {
+  const env = c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined
+  if (loopbackPeer(env?.incoming?.socket?.remoteAddress)) return next()
+  return c.json({ code: 'peer_refused' }, 403)
+}
 
 /** Refuses a request, of any method, whose Host is not one of Studio's two addresses. */
 export const studioHostsOnly: MiddlewareHandler = async (c, next) => {

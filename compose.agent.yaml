@@ -5,8 +5,9 @@
 #   docker compose -f compose.yaml -f compose.agent.yaml up -d
 #
 # The node posts its webhook to http://agent:4111/hdtp/webhook (the endpoint is added on the
-# portal's Webhooks page). Port 4111 is published nowhere: Mastra's /api routes there ask for no
-# credential, so only the containers of this project reach them.
+# portal's Webhooks page). Port 4111 is published nowhere, and a caller from another container
+# reaches only the webhook there (and Mastra's inert /api/auth routes): Mastra's /api routes ask for
+# no credential, so they answer the agent's own loopback only (README, "Who reaches port 4111").
 services:
   agent:
     image: ghcr.io/humandelegatedtrustprotocol/hdtp-gateway-agent:latest

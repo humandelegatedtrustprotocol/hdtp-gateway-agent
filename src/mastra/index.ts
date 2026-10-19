@@ -1,7 +1,9 @@
 // The Mastra project: the delegate agent, and the node's webhook on Mastra's own server.
 // The server binds the loopback interface only, unless MASTRA_HOST names another address (the
-// image sets 0.0.0.0, so the node's container can post to it): Studio and Mastra's /api routes ask
-// for no credential, so they are offered to the network only when the owner asks. Studio opens at
+// image sets 0.0.0.0, so the node's container can post to it). Studio and Mastra's /api routes ask
+// for no credential, so they answer a caller on the loopback interface only, wherever the server
+// binds (origins.ts): from another host only the public routes answer, the webhook and Mastra's
+// auth routes, which do nothing here. Studio opens at
 // http://localhost:4111 or http://127.0.0.1:4111 (another port if PORT names one, or if
 // `mastra dev` finds 4111 taken); MASTRA_AUTO_DETECT_URL=true, set by the npm scripts and the
 // Makefile, has it call its API at the address it was opened at.
@@ -15,7 +17,7 @@ import { readConfig } from '../hdtp/config.ts'
 import { receive, startRuntime } from '../hdtp/runtime.ts'
 import { delegate } from './agents/delegate.ts'
 import { observe } from './observe.ts'
-import { STUDIO_ORIGINS, bindHost, studioHostsOnly, studioWritesOnly } from './origins.ts'
+import { STUDIO_ORIGINS, bindHost, loopbackPeersOnly, studioHostsOnly, studioWritesOnly } from './origins.ts'
 import { startSweep } from './retention.ts'
 
 export const mastra = new Mastra({
@@ -56,10 +58,13 @@ export const mastra = new Mastra({
   },
 })
 
-// The host rule, on every path but the public ones (origins.ts). Mastra runs this middleware
-// before its own routes (/health, the /api welcome page, the browser routes and their WebSocket),
-// which it registers before `server.middleware`, so the host rule reaches them too.
-mastra.setServerMiddleware([{ path: '*', handler: studioHostsOnly }])
+// The peer rule and the host rule, on every path but the public ones (origins.ts). Mastra runs
+// this middleware before its own routes (/health, the /api welcome page, the browser routes and
+// their WebSocket), which it registers before `server.middleware`, so both rules reach them too.
+mastra.setServerMiddleware([
+  { path: '*', handler: loopbackPeersOnly },
+  { path: '*', handler: studioHostsOnly },
+])
 
 // Statements, not bindings the `server` option refers to: see src/hdtp/runtime.ts. After the
 // Mastra instance, whose observability records the runtime's spans and lines.

@@ -18,6 +18,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { FRAME } from '../src/hdtp/prompt.ts'
+import { loopbackPeersOnly } from '../src/mastra/origins.ts'
 import { SIGNATURE_HEADER } from '../src/hdtp/signature.ts'
 import { FakeNode, envelope, sign } from './fakes.ts'
 import { TOKEN, closedPort, serve } from './wire.ts'
@@ -256,7 +257,7 @@ describe('the served process under `mastra dev`', () => {
 })
 
 describe("the CLI's reading of the entry file", () => {
-  it('binds the address MASTRA_HOST names', async () => {
+  it('binds the address MASTRA_HOST names, and refuses every peer but loopback first', async () => {
     const { server, url } = await serve(new FakeNode())
     const vars = { ...hdtpEnv(url), MASTRA_HOST: '0.0.0.0' }
     const saved = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]))
@@ -265,6 +266,11 @@ describe("the CLI's reading of the entry file", () => {
     try {
       const { mastra } = await import('../src/mastra/index.ts')
       expect(mastra.getServer()?.host).toBe('0.0.0.0')
+      // Bound beyond the loopback interface, the peer rule runs first on every path, so a caller
+      // from another host is refused whatever Host it names.
+      const [first] = mastra.getServerMiddleware()
+      expect(first?.path).toBe('*')
+      expect(first?.handler).toBe(loopbackPeersOnly)
     } finally {
       for (const [k, v] of Object.entries(saved)) {
         if (v === undefined) delete process.env[k]
