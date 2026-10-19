@@ -1,6 +1,6 @@
 // An owner MCP served over HTTP as the node serves it, backed by a FakeNode. owner-mcp-tools.json
 // is the node's tools/list for the twelve tools this agent calls, captured on 2026-10-20 from
-// hdtp-gateway b59a199 on feat/owner-asks (N1): its owner MCP server built with the asks service
+// hdtp-gateway 34a6adf on fix/ask-catalog-guidance (#247): its owner MCP server built with the asks service
 // and a card source, listed over the in-memory transport. Like the node, the server answers
 // server/discover with "method not found" and keeps no session.
 import { createServer, type IncomingMessage, type Server } from 'node:http'

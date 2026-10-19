@@ -5,7 +5,8 @@
 // given up the owner got no card and no notice while the trace showed OK.
 //
 // test/surface-rules.json is the node's list of surface rules, read from hdtp-gateway 144945d (main,
-// with N1): every rule its catalog.go refuses by, `invalid("<rule>"` and `Rule: "<rule>"`, sorted.
+// with N1) and read again, unchanged, from 34a6adf (fix/ask-catalog-guidance, #247): every rule its
+// catalog.go refuses by, `invalid("<rule>"` and `Rule: "<rule>"`, sorted.
 
 import { readFileSync } from 'node:fs'
 import { toStandardSchema } from '@mastra/core/schema'

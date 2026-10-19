@@ -169,7 +169,7 @@
       "$defs": {
         "Button": {
           "additionalProperties": false,
-          "description": "A button whose label is a Text (child). Pressing it answers the ask. A ready reply is a Button whose event is \"reply\" and whose context is {reply: the reply's text}: one tap sends that text to the contact as the owner's own message. Any other Button answers with its context, each {path} read from the data model.",
+          "description": "A button whose label is a Text (child), never a TextField. Every component but root is placed exactly once: listed in root's children, or named as a Button's child, its label. Each Button, the Send too, has a label Text of its own as its child, and root's children do not list that Text. Pressing it answers the ask. A ready reply is a Button whose event is \"reply\" and whose context is {reply: the reply's text}: one tap sends that text to the contact as the owner's own message. Any other Button answers with its context, each {path} read from the data model.",
           "properties": {
             "action": {
               "additionalProperties": false,
@@ -350,7 +350,7 @@
         },
         "Column": {
           "additionalProperties": false,
-          "description": "The root, and only the root (id \"root\"), first in the list: its children, top to bottom. The first is a Text, the TLDR, second in the list.",
+          "description": "The root, and only the root (id \"root\"), first in the list: its children, top to bottom. The first is a Text, the TLDR, second in the list. Every component but root is placed exactly once: listed in root's children, or named as a Button's child, its label. Each Button, the Send too, has a label Text of its own as its child, and root's children do not list that Text.",
           "properties": {
             "children": {
               "$ref": "#/$defs/ChildList"
@@ -568,7 +568,7 @@
           "type": "string"
         },
         "surface": {
-          "description": "An A2UI v0.9.1 surface: a createSurface message naming catalogId https://hdtp.dev/a2ui/v0_9_1/catalogs/owner/catalog.json, then an updateComponents message for the same surfaceId. Its components list the root first, a Column of id \"root\", then the TLDR, the Text that is root's first child. Optionally a third, updateDataModel for the same surfaceId: the values the inputs start from. The owner answers by pressing a Button. Each ready reply is a Button of event \"reply\" with context {reply: its text}, sent in one tap; every input binds its value to a {path}, and the Button that sends it names those paths in its context. Every ask ends with the owner's own message: root's last two children are a TextField, then the Button that sends it, whose context reads the TextField's path.",
+          "description": "An A2UI v0.9.1 surface: a createSurface message naming catalogId https://hdtp.dev/a2ui/v0_9_1/catalogs/owner/catalog.json, then an updateComponents message for the same surfaceId. Its components list the root first, a Column of id \"root\", then the TLDR, the Text that is root's first child. Every component but root is placed exactly once: listed in root's children, or named as a Button's child, its label. Each Button, the Send too, has a label Text of its own as its child, and root's children do not list that Text. Optionally a third, updateDataModel for the same surfaceId: the values the inputs start from. The owner answers by pressing a Button. Each ready reply is a Button of event \"reply\" with context {reply: its text}, sent in one tap; every input binds its value to a {path}, and the Button that sends it names those paths in its context. Every ask ends with the owner's own message: root's last two children are a TextField, then the Button that sends it, whose context reads the TextField's path.",
           "maxItems": 3,
           "minItems": 2,
           "prefixItems": [
@@ -860,7 +860,7 @@
         },
         "Column": {
           "additionalProperties": false,
-          "description": "The root, and only the root (id \"root\"), first in the list: its children, top to bottom. The first is a Text, the TLDR, second in the list.",
+          "description": "The root, and only the root (id \"root\"), first in the list: its children, top to bottom. The first is a Text, the TLDR, second in the list. Every component but root is placed exactly once: listed in root's children, or named as a Button's child, its label. Each Button, the Send too, has a label Text of its own as its child, and root's children do not list that Text.",
           "properties": {
             "children": {
               "$ref": "#/$defs/ChildList"
@@ -998,7 +998,7 @@
           "type": "string"
         },
         "surface": {
-          "description": "An A2UI v0.9.1 surface: a createSurface message naming catalogId https://hdtp.dev/a2ui/v0_9_1/catalogs/owner/catalog.json, then an updateComponents message for the same surfaceId. Its components list the root first, a Column of id \"root\", then the TLDR, the Text that is root's first child. A notice holds only Text and KeyValue: it tells, and nothing answers it.",
+          "description": "An A2UI v0.9.1 surface: a createSurface message naming catalogId https://hdtp.dev/a2ui/v0_9_1/catalogs/owner/catalog.json, then an updateComponents message for the same surfaceId. Its components list the root first, a Column of id \"root\", then the TLDR, the Text that is root's first child. Every component but root is placed exactly once: listed in root's children, or named as a Button's child, its label. Each Button, the Send too, has a label Text of its own as its child, and root's children do not list that Text. A notice holds only Text and KeyValue: it tells, and nothing answers it.",
           "maxItems": 2,
           "minItems": 2,
           "prefixItems": [
