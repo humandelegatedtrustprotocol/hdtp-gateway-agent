@@ -233,6 +233,13 @@ export class FakeNode {
     this.threads.set(id, { account, contact_fpr: contact, contact_status: status, messages: [], readThrough: 0 })
   }
 
+  /** The owner opens the conversation in the portal, which marks it read and sends nothing. */
+  ownerReads(threadId: string): void {
+    const th = this.threads.get(threadId)
+    if (!th) throw new Error('no thread')
+    th.readThrough = th.messages.length
+  }
+
   /** A message from the contact, labelled as their side labelled it ('human' or 'agent'). */
   inbound(threadId: string, body: string, sender = 'human'): void {
     const th = this.threads.get(threadId)

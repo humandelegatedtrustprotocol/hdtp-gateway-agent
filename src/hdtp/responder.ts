@@ -41,6 +41,15 @@
 // is the owner's backlog, and is left unread for them. The cutoff is decided before read_thread.
 // It is not applied to requests: an open request is a caller waiting now, and it expires.
 //
+// Reading is not handling. The owner reading a thread in the portal marks it read, and the agent
+// still takes its turn on it: only the owner's own message (the thread's newest is then this side's)
+// or an ask they answer means they took the matter over. So a pass visits a thread that is unread,
+// and also one whose newest message (get_inbox's last_at) is newer than when the pass before saw it.
+// A thread is first seen by the first pass after a start: one the owner read while the agent was
+// stopped is left to them, as before. last_at is in seconds, so a second message of a thread in the
+// same second as one a pass has seen, read by the owner before the next pass, is left to them too;
+// a webhook (onMessage) reaches it either way.
+//
 // read_thread marks the thread read before the model has drafted anything. A turn that does not
 // parse, or that the node refuses (an ask_owner surface outside its catalog), fails the attempt. A thread whose draft
 // or send failed is therefore kept here and revisited by the next reconcile pass, up to
@@ -132,6 +141,8 @@ export class Responder {
   private readonly attempts = new Bounded<number>(REMEMBERED)
   /** Threads (account \0 thread) to revisit on the next reconcile pass. */
   private readonly revisit = new Bounded<true>(REMEMBERED)
+  /** Each thread's last_at as the last pass saw it: a thread that moved since is visited, read or not. */
+  private readonly seen = new Bounded<number>(REMEMBERED)
   /** Threads with an open ask, visited by each reconcile pass until it is not. */
   private readonly waiting = new Bounded<true>(REMEMBERED)
   /** Notices a turn chose that notify_owner has not taken yet, by thread, with the reply key they follow. */
@@ -189,8 +200,8 @@ export class Responder {
 
   /**
    * One pass over one account: its open requests first, since a caller is waiting on each, then
-   * its unread threads, the threads a failure left to revisit, those with an open ask, and those
-   * owing a notice. A section that fails is logged
+   * its unread threads, those with a newer message than the last pass saw (read by the owner or
+   * not), the threads a failure left to revisit, those with an open ask, and those owing a notice. A section that fails is logged
    * by code and the pass goes on, so a failing list_pending does not keep threads unanswered.
    */
   async reconcileAccount(accountId: string): Promise<void> {
@@ -202,7 +213,10 @@ export class Responder {
     await this.section('get_inbox', async () => {
       for (const row of await this.node.getInbox(accountId)) {
         const where = `${accountId}\0${row.thread_id}`
-        if (row.unread > 0 || this.revisit.has(where) || this.waiting.has(where) || this.owed.has(where)) {
+        const before = this.seen.get(where)
+        this.seen.set(where, row.last_at)
+        const moved = before !== undefined && row.last_at > before
+        if (row.unread > 0 || moved || this.revisit.has(where) || this.waiting.has(where) || this.owed.has(where)) {
           await this.answerThread(accountId, row)
         }
       }

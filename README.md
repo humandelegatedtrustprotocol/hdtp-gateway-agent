@@ -76,6 +76,14 @@ does not read them. What code enforces is the rules below, which hold for every 
 
 ## What it answers, and what it leaves to the owner
 
+Reading is not handling. The owner can keep a conversation open in the portal, which marks the
+contact's messages read, and the agent still takes its turn: it sits between the two sides until
+the owner writes in the thread themselves, or answers an ask. Then the thread's newest message is
+the owner's, and the agent has nothing to answer until the contact writes again. The agent notices
+a new message by the thread moving (its newest message's time), not only by unread counts, on
+every pass after the first one since it started; a thread the owner read while the agent was
+stopped is left to them.
+
 The first three rules are decided before the agent reads a thread, so whatever they leave is still
 unread in the owner's portal.
 

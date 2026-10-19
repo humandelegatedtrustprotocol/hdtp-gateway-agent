@@ -158,6 +158,57 @@ describe('one reply per newest inbound message', () => {
   })
 })
 
+describe('reading is not handling', () => {
+  it('takes its turn on a thread the owner has read in the portal since the last pass', async () => {
+    const { node, prompts, responder } = setup()
+    node.thread('th1')
+    node.inbound('th1', 'are you free on Tuesday?')
+    await responder.reconcile()
+    node.inbound('th1', 'or Wednesday?')
+    node.ownerReads('th1')
+    expect((await nodeClientOver(node.call, node.catalog).getInbox('acct-1'))[0]!.unread).toBe(0)
+    await responder.reconcile()
+    expect(prompts).toHaveLength(2)
+    expect(node.sent.map((s) => s.text)).toEqual(['reply 1', 'reply 2'])
+    // The thread moved again with the agent's own reply: the next pass reads it and drafts nothing,
+    // and a pass after that, with nothing moved, does not read it at all.
+    await responder.reconcile()
+    expect(prompts).toHaveLength(2)
+    const reads = node.calls.filter((c) => c === 'read_thread').length
+    await responder.reconcile()
+    expect(node.calls.filter((c) => c === 'read_thread').length).toBe(reads)
+  })
+
+  it('yields to the owner once they write in the thread themselves', async () => {
+    const { node, prompts, responder } = setup()
+    node.thread('th1')
+    node.inbound('th1', 'are you free on Tuesday?')
+    await responder.reconcile()
+    node.inbound('th1', 'or Wednesday?')
+    node.ownerReads('th1')
+    node.outbound('th1', 'Wednesday at 10 works, see you then.', 'human')
+    await responder.reconcile()
+    await responder.reconcile()
+    expect(prompts).toHaveLength(1)
+    expect(node.sent).toHaveLength(1)
+  })
+
+  it('leaves to the owner a thread they read before the first pass after a start', async () => {
+    const { node, prompts, responder } = setup()
+    node.thread('th1')
+    node.inbound('th1', 'are you free on Tuesday?')
+    node.ownerReads('th1')
+    await responder.reconcile()
+    await responder.reconcile()
+    expect(prompts).toHaveLength(0)
+    // And takes its turn when the contact writes again.
+    node.inbound('th1', 'or Wednesday?')
+    node.ownerReads('th1')
+    await responder.reconcile()
+    expect(prompts).toHaveLength(1)
+  })
+})
+
 describe('a failure after the thread was read', () => {
   it('is revisited by the next reconcile pass though the node counts it read, up to the limit', async () => {
     let fail = true
