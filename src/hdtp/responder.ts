@@ -150,8 +150,8 @@ export class Responder {
   private readonly waiting = new Bounded<true>(REMEMBERED)
   /** Notices a turn chose that notify_owner has not taken yet, by thread, with the reply key they follow. */
   private readonly owed = new Bounded<{ key: string; args: SurfaceArgs }>(REMEMBERED)
-  /** The owner's display name by account, once read (nameOf). */
-  private readonly names = new Map<string, string>()
+  /** The owner's display name by account, as the read of it (nameOf): passes that meet share one. */
+  private readonly names = new Map<string, Promise<string>>()
   /** Work in flight by key, and whether another call asked for it while it ran. */
   private readonly running = new Map<string, { again: boolean }>()
 
@@ -426,20 +426,25 @@ export class Responder {
   /**
    * The owner's display name, read from their card (export_card) once per account: at the account's
    * first pass, or its first webhook. "" when the card names no one; a failed read is logged, the
-   * turn goes on without the name, and the next turn reads it again.
+   * turn goes on without the name, and the next turn reads it again. Passes that start before the
+   * first read ends wait on that read rather than make their own.
    */
-  private async nameOf(accountId: string): Promise<string> {
+  private nameOf(accountId: string): Promise<string> {
     const known = this.names.get(accountId)
     if (known !== undefined) return known
-    try {
-      const name = await this.node.ownerName(accountId)
-      this.names.set(accountId, name)
-      this.log.info('owner_name', { account_id: accountId, named: name !== '' })
-      return name
-    } catch (e) {
-      this.log.warn('owner_name_unread', { account_id: accountId, reason: refusalCode(e) })
-      return ''
-    }
+    const read = this.node.ownerName(accountId).then(
+      (name) => {
+        this.log.info('owner_name', { account_id: accountId, named: name !== '' })
+        return name
+      },
+      (e: unknown) => {
+        this.names.delete(accountId)
+        this.log.warn('owner_name_unread', { account_id: accountId, reason: refusalCode(e) })
+        return ''
+      },
+    )
+    this.names.set(accountId, read)
+    return read
   }
 
   /**

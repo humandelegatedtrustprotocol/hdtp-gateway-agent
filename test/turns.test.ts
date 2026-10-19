@@ -241,6 +241,14 @@ describe('whose message it is', () => {
     expect(log.lines.filter((l) => l.code === 'owner_name')).toEqual([{ code: 'owner_name', fields: { account_id: 'acct-1', named: true } }])
   })
 
+  it('reads the owner’s name once when two passes start together', async () => {
+    const { node, log, responder } = setup(async () => none())
+    node.inbound('th1', 'Hello?', 'agent')
+    await Promise.all([responder.reconcile(), responder.reconcile(), responder.onMessage('th1')])
+    expect(node.calls.filter((c) => c === 'export_card')).toHaveLength(1)
+    expect(log.lines.filter((l) => l.code === 'owner_name')).toHaveLength(1)
+  })
+
   it('shows the person’s answers to the thread’s earlier asks as their decisions, and nothing else', async () => {
     const { node, prompts, responder } = setup(async (p) => {
       const last = conversation(p).at(-1)!.text
