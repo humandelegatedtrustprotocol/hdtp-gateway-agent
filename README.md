@@ -95,6 +95,15 @@ use cases (a meeting, an event venue, GPU procurement, a rent renewal, a dentist
 leave request, a refund), each with its limits and its stances. The model follows the stances; code
 does not read them. What code enforces is the rules below, which hold for every turn.
 
+`make eval` measures how well a model follows them. It drafts the turn at ten points of the
+meeting and dentist stories (`eval/points.ts`), with the example personas, through the agent's own
+path: the frame and persona as instructions, the configured model, the 4096-token cap, and the
+turn read against the node's schema as `test/owner-mcp-tools.json` holds it. It runs 5 times per
+point, 50 model calls, the most one run makes, never retried. It prints one JSON line per call and,
+per point, how many turns were of a passing type and how many were valid. `EVAL=--dry` builds every
+prompt and calls no model; `EVAL='--runs 1 --only u1-3'` runs part of it. It is not part of
+`make check`, which holds its points and its dry run with no network.
+
 ## What it answers, and what it leaves to the owner
 
 Reading is not handling. The owner can keep a conversation open in the portal, which marks the

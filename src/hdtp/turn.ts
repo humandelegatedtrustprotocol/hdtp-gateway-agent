@@ -113,10 +113,10 @@ export function withoutNulls(value: unknown): unknown {
 
 /** Reads turns against the node's schema, which is read once and kept. */
 export class Turns {
-  private readonly node: NodeClient
+  private readonly node: Pick<NodeClient, 'toolSchema'>
   private built: Promise<{ schema: JsonSchema; check: ReturnType<typeof toStandardSchema> }> | null = null
 
-  constructor(node: NodeClient) {
+  constructor(node: Pick<NodeClient, 'toolSchema'>) {
     this.node = node
   }
 
