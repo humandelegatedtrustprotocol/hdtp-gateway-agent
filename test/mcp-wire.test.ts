@@ -1,14 +1,16 @@
 // The real client path: @mastra/mcp's MCPClient against an owner MCP served over HTTP as the node
 // serves it (test/wire.ts).
 
+import { readFileSync } from 'node:fs'
 import type { Server } from 'node:http'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { NodeRefusal, connectNode } from '../src/hdtp/node.ts'
+import { NodeRefusal, TOOLS_CALLED, connectNode, decodeAnswer } from '../src/hdtp/node.ts'
+import { missingTools } from '../src/hdtp/runtime.ts'
 import { Responder } from '../src/hdtp/responder.ts'
 import { SIGNATURE_HEADER } from '../src/hdtp/signature.ts'
 import { createReceiver } from '../src/hdtp/webhook.ts'
-import { FakeNode, envelope, memoryLog, rules, sign } from './fakes.ts'
-import { TOKEN, closedPort, serve } from './wire.ts'
+import { FakeNode, TOOLS, ask, envelope, memoryLog, reply, rules, sign } from './fakes.ts'
+import { LISTED, TOKEN, closedPort, deepSchema, listedWith, serve, wideSchema, type ListedTool } from './wire.ts'
 
 describe('the owner MCP over the wire', () => {
   const node = new FakeNode()
@@ -22,6 +24,41 @@ describe('the owner MCP over the wire', () => {
     // A wait the client let go of is still held by the fake until its clock runs out.
     server.closeAllConnections()
     return new Promise<void>((r) => server.close(() => r()))
+  })
+
+  it('reads the rule a refusal names, as a code, over the wire', async () => {
+    // A node of its own, so the thread it makes is in no other test's inbox.
+    const own = new FakeNode()
+    own.thread('th-rule')
+    own.inbound('th-rule', 'Wednesday?')
+    own.invalidSurfaces = 1
+    const served = await serve(own)
+    const { node: client, disconnect } = connectNode(served.url, TOKEN)
+    try {
+      const surface = (JSON.parse(ask('TLDR', { When: 'Wed' }, ['Wednesday works for me.'])) as { ask: { surface: unknown } }).ask.surface
+      const refused = await client.askOwner({ account_id: 'acct-1', thread_id: 'th-rule', for_message_id: 'm-x', surface }).catch((e: unknown) => e)
+      expect(refused).toMatchObject({ tool: 'ask_owner', code: 'bad_request', reason: 'invalid_surface:component_shape' })
+    } finally {
+      await disconnect()
+      served.server.closeAllConnections()
+      await new Promise<void>((r) => served.server.close(() => r()))
+    }
+  })
+
+  it('keeps a refusal’s reason only when it is a code, and never its text', () => {
+    const answer = (v: Record<string, unknown>) => ({ isError: true, content: [{ type: 'text', text: JSON.stringify({ code: 'bad_request', ...v }) }] })
+    const reason = (v: Record<string, unknown>) => {
+      try {
+        decodeAnswer('ask_owner', answer(v))
+      } catch (e) {
+        return (e as NodeRefusal).reason
+      }
+    }
+    expect(reason({ reason: 'invalid_surface:prop_size' })).toBe('invalid_surface:prop_size')
+    expect(reason({})).toBe('')
+    for (const bad of ['Surface too large: 9000 bytes', 'invalid_surface:a:b', `invalid_surface:${'x'.repeat(60)}`, 'Invalid_surface', 7, null]) {
+      expect(reason({ reason: bad }), String(bad)).toBe('')
+    }
   })
 
   it('calls the tools by name with the bearer token, and reads refusals by code', async () => {
@@ -47,7 +84,7 @@ describe('the owner MCP over the wire', () => {
     node.inbound('th2', 'are you around?')
     const { node: client, disconnect } = connectNode(url, TOKEN)
     const tasks: Array<Promise<void>> = []
-    const responder = new Responder(client, async () => 'Yes, Alex is around.', memoryLog(), rules({ answer: 'trusted' }))
+    const responder = new Responder(client, async () => reply('Yes, Alex is around.'), memoryLog(), rules({ answer: 'trusted' }))
     const receive = createReceiver({
       secret: () => 'whsec_x',
       log: memoryLog(),
@@ -74,6 +111,29 @@ describe('the owner MCP over the wire', () => {
     expect(replies).toHaveLength(1)
     expect(replies[0]).toMatchObject({ account_id: 'acct-1', contact_fpr: 'fpr-contact', text: 'Yes, Alex is around.' })
     expect(replies[0]!.msg_id).toMatch(/^agent-reply-[0-9a-f]{32}$/)
+  })
+
+  it('reads the asks tools’ input schemas back as the node lists them, and puts an ask', async () => {
+    node.thread('th3')
+    node.inbound('th3', 'shall we book Wednesday?')
+    const { node: client, disconnect } = connectNode(url, TOKEN)
+    try {
+      for (const name of ['send_to_contact', 'ask_owner', 'notify_owner']) {
+        // The client names the dialect on every schema it reads; the node names it on the asks tools'.
+        const { $schema: named, ...listed } = TOOLS.find((t) => t.name === name)!.inputSchema
+        const { $schema: dialect, ...read } = await client.toolSchema(name)
+        expect(read, name).toEqual(listed)
+        if (named !== undefined) expect(dialect, name).toBe(named)
+      }
+      const missing = await client.toolSchema('no_such_tool').catch((e: unknown) => e)
+      expect((missing as NodeRefusal).code).toBe('tool_not_offered')
+      const responder = new Responder(client, async () => ask('Book Wed?', { When: 'Wed' }, ['Yes, book it']), memoryLog(), rules())
+      await responder.onMessage('th3')
+      expect(node.asks.filter((a) => a.thread_id === 'th3')).toHaveLength(1)
+      expect((await client.listAsks('acct-1', 'th3')).map((a) => [a.thread_id, a.kind, a.status])).toEqual([['th3', 'ask', 'open']])
+    } finally {
+      await disconnect()
+    }
   })
 
   it('waits from a cursor, and ends a held wait when its signal aborts', async () => {
@@ -135,5 +195,66 @@ describe('the owner MCP over the wire', () => {
     } finally {
       await disconnect()
     }
+  })
+})
+
+describe('the boot check over the wire', () => {
+  // The listing the client takes from a node serving `tools`, held to the tools this agent calls.
+  const missing = async (tools: ListedTool[]) => {
+    const { server, url } = await serve(new FakeNode(), 0, tools)
+    const { node: client, disconnect } = connectNode(url, TOKEN)
+    try {
+      return await missingTools(client)
+    } finally {
+      await disconnect()
+      server.closeAllConnections()
+      await new Promise<void>((r) => server.close(() => r()))
+    }
+  }
+
+  it('passes the node’s tools as listed', async () => {
+    expect(await missing(LISTED)).toEqual({ tools: [], skipped: [] })
+  })
+
+  it('names a tool the client skipped, with the schema’s fault as a code', async () => {
+    expect(await missing(listedWith('ask_owner', wideSchema(10_001)))).toEqual({
+      tools: ['ask_owner'],
+      skipped: ['ask_owner:schema_too_large'],
+    })
+    expect(await missing(listedWith('notify_owner', deepSchema(130)))).toEqual({
+      tools: ['notify_owner'],
+      skipped: ['notify_owner:schema_too_deep'],
+    })
+    expect(await missing(listedWith('list_asks', { type: 'object', properties: { thread_id: { type: 'no_such_type' } } }))).toEqual({
+      tools: ['list_asks'],
+      skipped: ['list_asks:schema_invalid'],
+    })
+  })
+
+  it('reports only what the listing it read skipped, once the node is listed again', async () => {
+    const tools = listedWith('ask_owner', wideSchema(10_001))
+    const { server, url } = await serve(new FakeNode(), 0, tools)
+    const { node: client, disconnect } = connectNode(url, TOKEN)
+    try {
+      expect((await client.listTools()).skipped).toEqual({ ask_owner: 'schema_too_large' })
+      // The node is upgraded; a tool it does not offer makes the client list it again.
+      tools.splice(0, tools.length, ...LISTED)
+      expect(((await client.toolSchema('no_such_tool').catch((e: unknown) => e)) as NodeRefusal).code).toBe('tool_not_offered')
+      expect(await client.listTools()).toEqual({ offered: LISTED.map((t) => t.name), skipped: {} })
+    } finally {
+      await disconnect()
+      server.closeAllConnections()
+      await new Promise<void>((r) => server.close(() => r()))
+    }
+  })
+
+  it('names a tool the node does not list, with no reason to give', async () => {
+    expect(await missing(LISTED.filter((t) => t.name !== 'list_asks'))).toEqual({ tools: ['list_asks'], skipped: [] })
+  })
+
+  it('checks every tool node.ts calls', async () => {
+    const source = readFileSync(new URL('../src/hdtp/node.ts', import.meta.url), 'utf8')
+    const called = [...source.matchAll(/json\('([a-z_]+)'/g)].map((m) => m[1])
+    expect([...TOOLS_CALLED].sort()).toEqual([...new Set(called)].sort())
   })
 })

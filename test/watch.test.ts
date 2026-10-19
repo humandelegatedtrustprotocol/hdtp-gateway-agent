@@ -6,12 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NodeRefusal, nodeClientOver } from '../src/hdtp/node.ts'
 import { Responder, type Draft } from '../src/hdtp/responder.ts'
 import { BACKOFF_MAX_MS, Watcher } from '../src/hdtp/watch.ts'
-import { FakeNode, memoryLog, ok, rules, type ToolAnswer } from './fakes.ts'
+import { FakeNode, memoryLog, ok, reply, rules, type ToolAnswer } from './fakes.ts'
 
-function setup(draft: Draft = async () => 'an answer') {
+function setup(draft: Draft = async () => reply('an answer')) {
   const node = new FakeNode()
   const log = memoryLog()
-  const client = nodeClientOver(node.call)
+  const client = nodeClientOver(node.call, node.catalog)
   const responder = new Responder(client, draft, log, rules())
   const watcher = new Watcher(client, (accountId) => responder.reconcileAccount(accountId), log)
   return { node, log, watcher }
@@ -34,7 +34,7 @@ describe('the wait_for_updates loop', () => {
   it('asks the node at least every 25 s while a draft takes 90 s', async () => {
     const { node, watcher } = setup(async () => {
       await new Promise((r) => setTimeout(r, 90_000))
-      return 'an answer'
+      return reply('an answer')
     })
     watcher.sync(['acct-1'])
     await vi.advanceTimersByTimeAsync(10_000)
@@ -144,7 +144,7 @@ describe('the wait_for_updates loop', () => {
     const log = memoryLog()
     let passes = 0
     const watcher = new Watcher(
-      nodeClientOver(node.call),
+      nodeClientOver(node.call, node.catalog),
       async () => {
         if (++passes === 1) throw new NodeRefusal('get_inbox', 'internal')
       },

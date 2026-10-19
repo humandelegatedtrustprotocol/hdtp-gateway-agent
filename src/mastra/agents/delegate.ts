@@ -1,5 +1,6 @@
-// The delegate: drafts a reply in the owner's voice and does nothing else. It is given no tools;
-// reading the thread and sending the reply are done by code (src/hdtp/responder.ts).
+// The delegate: chooses each turn in the owner's voice (a reply, an ask, a notice or none) and does
+// nothing else. It is given no tools; reading the thread and carrying the turn out are done by code
+// (src/hdtp/responder.ts).
 
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -22,7 +23,7 @@ export function instructions(personaFile = config.personaFile): string {
 export const delegate = new Agent({
   id: 'delegate',
   name: 'Delegate',
-  description: "Drafts replies to an HDTP node's contacts on behalf of its owner",
+  description: "Answers an HDTP node's contacts on behalf of its owner, and asks or notifies the owner",
   instructions: instructions(),
   model: config.model,
 })
