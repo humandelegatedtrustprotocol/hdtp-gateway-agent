@@ -1,7 +1,7 @@
 // The node's owner MCP, called by code. Its tools are never handed to the model.
 //
 // Names and shapes are the node's (hdtp-gateway internal/internalui/ownermcp/server.go):
-// arguments in snake_case; get_inbox and read_thread rows in snake_case; list_pending rows and
+// arguments in snake_case; get_inbox, read_thread and list_contacts rows in snake_case; list_pending rows and
 // send_to_contact's result in Go's field names, which carry no json tags. A refusal is a tool
 // error whose text is {"code", "detail"}; only the code is kept.
 
@@ -19,6 +19,8 @@ export interface InboxThread {
 
 /** One message of read_thread, oldest first. */
 export interface ThreadMessage {
+  /** The message's msg_id on the node, unique per account, contact and direction. */
+  message_id: string
   direction: string // "in" from the contact, "out" from this side
   sender: string
   kind: string
@@ -27,12 +29,22 @@ export interface ThreadMessage {
   created_at: number
 }
 
+/** One row of list_contacts, the fields this agent reads. */
+export interface Contact {
+  fingerprint: string
+  status: string
+  /** The owner's stance on the contact: messages_only (the node's default) or may_instruct. */
+  trust_flag: string
+}
+
 /** One row of list_pending. */
 export interface PendingRequest {
   ID: string
   ContactFpr: string
   Capability: string
   Args: string // the caller's arguments, untrusted
+  /** The contact's trust flag, as list_contacts names it trust_flag. */
+  TrustFlag: string
   Status: string
   ExpiresAt: number
 }
@@ -72,6 +84,7 @@ export interface WaitAnswer {
 export interface NodeClient {
   listAccounts(): Promise<string[]>
   getInbox(accountId: string): Promise<InboxThread[]>
+  listContacts(accountId: string): Promise<Contact[]>
   readThread(accountId: string, threadId: string): Promise<ThreadMessage[]>
   sendToContact(args: SendArgs): Promise<void>
   listPending(accountId: string): Promise<PendingRequest[]>
@@ -134,6 +147,9 @@ export function nodeClientOver(call: CallTool): NodeClient {
     },
     async getInbox(accountId) {
       return ((await json('get_inbox', { account_id: accountId })) as InboxThread[] | null) ?? []
+    },
+    async listContacts(accountId) {
+      return ((await json('list_contacts', { account_id: accountId })) as Contact[] | null) ?? []
     },
     async readThread(accountId, threadId) {
       return ((await json('read_thread', { account_id: accountId, thread_id: threadId })) as ThreadMessage[] | null) ?? []

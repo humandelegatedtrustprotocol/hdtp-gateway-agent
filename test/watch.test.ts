@@ -6,13 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NodeRefusal, nodeClientOver } from '../src/hdtp/node.ts'
 import { Responder, type Draft } from '../src/hdtp/responder.ts'
 import { BACKOFF_MAX_MS, Watcher } from '../src/hdtp/watch.ts'
-import { FakeNode, memoryLog, ok, type ToolAnswer } from './fakes.ts'
+import { FakeNode, memoryLog, ok, rules, type ToolAnswer } from './fakes.ts'
 
 function setup(draft: Draft = async () => 'an answer') {
   const node = new FakeNode()
   const log = memoryLog()
   const client = nodeClientOver(node.call)
-  const responder = new Responder(client, draft, log)
+  const responder = new Responder(client, draft, log, rules())
   const watcher = new Watcher(client, (accountId) => responder.reconcileAccount(accountId), log)
   return { node, log, watcher }
 }
@@ -79,7 +79,7 @@ describe('the wait_for_updates loop', () => {
     watcher.sync(['acct-1'])
     await vi.advanceTimersByTimeAsync(5_000)
     // A message the change log no longer holds, then a wait whose cursor the log cannot answer from.
-    node.threads.get('th1')!.messages.push({ direction: 'in', sender: 'human', kind: 'text', body: 'hello', trust: 'messages_only', created_at: 1 })
+    node.threads.get('th1')!.messages.push({ direction: 'in', sender: 'human', kind: 'text', body: 'hello', trust: 'messages_only', message_id: 'msg-1', created_at: 1 })
     node.expireNext = true
     await vi.advanceTimersByTimeAsync(node.holdMs + 1_000)
     watcher.stop()

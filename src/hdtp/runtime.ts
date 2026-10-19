@@ -15,6 +15,7 @@
 import type { Agent } from '@mastra/core/agent'
 import type { Config } from './config.ts'
 import { consoleLog, type Log } from './log.ts'
+import { FirstStartUnreadable, firstStart } from './first-start.ts'
 import { connectNode, refusalCode } from './node.ts'
 import { Responder } from './responder.ts'
 import { Watcher, backoff } from './watch.ts'
@@ -32,13 +33,34 @@ export function startRuntime(config: Config, agent: Agent, log: Log = consoleLog
   if (receiver) return () => {}
   let responder: Responder | null = null
   let stop = () => {}
-  if (!config.ownerToken) {
-    // Studio still runs, so the persona can be tried there before a node is connected.
-    log.warn('owner_token_unset')
+  const now = () => Math.floor(Date.now() / 1000)
+  // Why nothing is answered, when nothing is. Studio still runs either way, so the persona can be
+  // tried there.
+  let idleWhy = 'owner_token_unset'
+  const token = config.ownerToken
+  let since: number | null = null
+  if (token) {
+    try {
+      since = firstStart(config.dataDir, now())
+      log.info('first_start', { first_start: since })
+    } catch (e) {
+      // A file that is there and is not a first-start time is not taken for none: answering the
+      // backlog is what the file is for. The owner fixes or deletes it, and restarts.
+      idleWhy = e instanceof FirstStartUnreadable ? 'first_start_unreadable' : 'first_start_unwritable'
+    }
+  }
+  if (!token || since === null) {
+    log.warn(idleWhy)
   } else {
-    const { node } = connectNode(config.ownerMcpUrl, config.ownerToken)
+    const { node } = connectNode(config.ownerMcpUrl, token)
     const draft = async (prompt: string) => (await agent.generate(prompt)).text
-    const r = new Responder(node, draft, log, config.agentTurnCap)
+    const r = new Responder(node, draft, log, {
+      answer: config.answer,
+      turnCap: config.agentTurnCap,
+      repliesPerHour: config.repliesPerHour,
+      firstStart: since,
+      now,
+    })
     responder = r
     const watcher = new Watcher(node, (accountId) => r.reconcileAccount(accountId), log)
     let sweeping = false
@@ -65,7 +87,7 @@ export function startRuntime(config: Config, agent: Agent, log: Log = consoleLog
       watcher.stop()
     }
   }
-  const idle = async () => log.warn('owner_token_unset')
+  const idle = async () => log.warn(idleWhy)
   receiver = createReceiver({
     secret: () => config.webhookSecret,
     log,

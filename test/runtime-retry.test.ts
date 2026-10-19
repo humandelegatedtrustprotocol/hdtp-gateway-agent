@@ -2,6 +2,9 @@
 // watcher's backoff, not at the next interval, so the loops start as soon as the node answers. A
 // file of its own, because a process starts one runtime and this one is left started.
 
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { Agent } from '@mastra/core/agent'
 import { afterAll, describe, expect, it } from 'vitest'
 import { readConfig } from '../src/hdtp/config.ts'
@@ -27,7 +30,16 @@ describe('a runtime started while the node refuses', () => {
     node.failing.add('list_accounts')
     const agent = { generate: async () => ({ text: 'reply' }) } as unknown as Agent
     const log = memoryLog()
-    stop = startRuntime(readConfig({ HDTP_OWNER_MCP_URL: url, HDTP_OWNER_TOKEN: TOKEN, HDTP_RECONCILE_SECONDS: '3600' }), agent, log)
+    stop = startRuntime(
+      readConfig({
+        HDTP_OWNER_MCP_URL: url,
+        HDTP_OWNER_TOKEN: TOKEN,
+        HDTP_RECONCILE_SECONDS: '3600',
+        HDTP_AGENT_DATA_DIR: mkdtempSync(join(tmpdir(), 'hdtp-agent-data-')),
+      }),
+      agent,
+      log,
+    )
     for (let i = 0; i < 100 && !log.lines.some((l) => l.code === 'reconcile_failed'); i++) await new Promise((r) => setTimeout(r, 20))
     node.failing.delete('list_accounts')
     // The first retry comes after one second.

@@ -18,6 +18,34 @@ an agent-answered capability finds no agent outside that minute, and the node fa
 The node holds each wait for at most 25 s, so the loop keeps the agent attached between sweeps.
 `docs/a2-observed.md` records runs against two real nodes.
 
+It needs a node whose owner MCP `read_thread` gives each message its `message_id`
+([hdtp-gateway#208](https://github.com/humandelegatedtrustprotocol/hdtp-gateway/issues/208)): the
+first hdtp-gateway release after v0.2.0, which carries #208 (v0.3.0 is planned). v0.2.0 and earlier
+give none, and the agent answers no thread of theirs (`message_id_missing` in its log). Each reply
+is sent under a `msg_id` derived from the id of the message it answers, so every path that reaches
+one message, in any process, sends one reply, which the node records once.
+
+## What it answers, and what it leaves to the owner
+
+The first three rules are decided before the agent reads a thread, so whatever they leave is still
+unread in the owner's portal.
+
+- **Only contacts the owner trusts, by default.** A contact is trusted when the owner has set
+  its trust to "May instruct your agent" (`may_instruct`) on the contact's page in the portal.
+  Every other contact's messages and requests are left to the owner. `HDTP_AGENT_ANSWER=all`
+  answers every active contact instead, as a public demo node would.
+- **Only what arrived after its first start.** The first start writes its time to
+  `first-start.json` in the data directory: `HDTP_AGENT_DATA_DIR`, by default `data/` in the
+  directory the agent was started from. Every later start reads it back, so a restart does not move
+  it. A thread whose newest message is older is the owner's backlog. Delete the file to make the
+  next start count as the first. A file that is there and cannot be read stops the agent answering
+  anything (`first_start_unreadable` in its log) until it is fixed or deleted.
+- **At most `HDTP_AGENT_REPLIES_PER_HOUR` drafts per contact per hour** (10 by default). Replies to
+  any of their threads and answers to their requests count alike, whatever the messages' sender
+  labels say. A restart starts every count again.
+- **`HDTP_AGENT_TURN_CAP` agent-to-agent turns in a row per thread** (3 by default), so two agents
+  cannot answer each other forever.
+
 Work in progress: the full README follows.
 
 ```sh

@@ -7,7 +7,7 @@ import { NodeRefusal, connectNode } from '../src/hdtp/node.ts'
 import { Responder } from '../src/hdtp/responder.ts'
 import { SIGNATURE_HEADER } from '../src/hdtp/signature.ts'
 import { createReceiver } from '../src/hdtp/webhook.ts'
-import { FakeNode, envelope, memoryLog, sign } from './fakes.ts'
+import { FakeNode, envelope, memoryLog, rules, sign } from './fakes.ts'
 import { TOKEN, closedPort, serve } from './wire.ts'
 
 describe('the owner MCP over the wire', () => {
@@ -41,12 +41,13 @@ describe('the owner MCP over the wire', () => {
     expect(unauthorized()).toBe(0)
   })
 
-  it('carries a signed message.received through to one reply on the node', async () => {
+  it('carries a signed message.received from a trusted contact through to one reply on the node', async () => {
+    node.trust.set('fpr-contact', 'may_instruct')
     node.thread('th2')
     node.inbound('th2', 'are you around?')
     const { node: client, disconnect } = connectNode(url, TOKEN)
     const tasks: Array<Promise<void>> = []
-    const responder = new Responder(client, async () => 'Yes, Alex is around.', memoryLog())
+    const responder = new Responder(client, async () => 'Yes, Alex is around.', memoryLog(), rules({ answer: 'trusted' }))
     const receive = createReceiver({
       secret: () => 'whsec_x',
       log: memoryLog(),

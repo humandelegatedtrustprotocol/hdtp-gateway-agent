@@ -58,6 +58,24 @@ describe('the configuration', () => {
     expect(readConfig({ HDTP_AGENT_TURN_CAP: '2.5' }).agentTurnCap).toBe(3)
   })
 
+  it('allows 10 drafts per contact per hour by default, and a whole number above 0 when set', () => {
+    expect(readConfig({}).repliesPerHour).toBe(10)
+    expect(readConfig({ HDTP_AGENT_REPLIES_PER_HOUR: '2' }).repliesPerHour).toBe(2)
+    expect(readConfig({ HDTP_AGENT_REPLIES_PER_HOUR: '0' }).repliesPerHour).toBe(10)
+  })
+
+  it('keeps its data in ./data by default, or where HDTP_AGENT_DATA_DIR says', () => {
+    expect(readConfig({}).dataDir).toBe('data')
+    expect(readConfig({ HDTP_AGENT_DATA_DIR: '/var/lib/agent' }).dataDir).toBe('/var/lib/agent')
+  })
+
+  it('answers trusted contacts only unless HDTP_AGENT_ANSWER is exactly all', () => {
+    expect(readConfig({}).answer).toBe('trusted')
+    expect(readConfig({ HDTP_AGENT_ANSWER: 'all' }).answer).toBe('all')
+    expect(readConfig({ HDTP_AGENT_ANSWER: ' all ' }).answer).toBe('all')
+    for (const v of ['trusted', 'ALL', 'everyone', '']) expect(readConfig({ HDTP_AGENT_ANSWER: v }).answer, v).toBe('trusted')
+  })
+
   it('lists every variable it reads in .env.example', () => {
     const example = readFileSync('.env.example', 'utf8')
     const source = readFileSync('src/hdtp/config.ts', 'utf8')
