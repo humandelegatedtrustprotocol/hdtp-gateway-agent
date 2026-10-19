@@ -30,7 +30,7 @@ import { FirstStartUnreadable, firstStart } from './first-start.ts'
 import { NodeRefusal, TOOLS_CALLED, connectNode, refusalCode, type NodeClient } from './node.ts'
 import { Responder, type Draft } from './responder.ts'
 import { Watcher, backoff } from './watch.ts'
-import { createReceiver } from './webhook.ts'
+import { Tally, UNTRACED_EVERY_MS, createReceiver } from './webhook.ts'
 
 let receiver: ((req: Request) => Promise<Response>) | null = null
 
@@ -142,15 +142,23 @@ export function startRuntime(config: Config, agent: Agent, log: Log = consoleLog
     }
   }
   const idle = async () => log.warn(idleWhy)
+  // The hits the receiver gives no span, logged as one line of counts at most once a minute, from
+  // outside any span: the line is given a span of its own (src/mastra/observe.ts).
+  const tally = new Tally()
+  const untracedTimer = setInterval(() => tally.flush(log), UNTRACED_EVERY_MS).unref()
   receiver = createReceiver({
     secret: () => config.webhookSecret,
     log,
     trace,
+    tally,
     handlers: {
       message: (thread) => (responder ? responder.onMessage(thread) : idle()),
       reconcile: () => (responder ? responder.reconcile() : idle()),
       request: (request) => (responder ? responder.onRequest(request) : idle()),
     },
   })
-  return stop
+  return () => {
+    clearInterval(untracedTimer)
+    stop()
+  }
 }

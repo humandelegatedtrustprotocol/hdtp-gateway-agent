@@ -159,7 +159,7 @@ unread in the owner's portal.
 `npm run dev` serves Mastra Studio at http://localhost:4111, to this machine only. Its
 Observability pages show what the agent did:
 
-- **Traces**: one for each webhook hit (`webhook`, a bad signature included), each reconcile pass
+- **Traces**: one for each webhook delivery the node signed and the agent had not seen (`webhook`), each reconcile pass
   (`reconcile`, every `HDTP_RECONCILE_SECONDS`, so a quiet agent adds one a minute by default) and
   each pass a wait loop starts (`watch_pass`). A line logged outside those, such as the start's
   `first_start` or a wait loop's `watch_failed`, is a trace of its own, named by its code. A draft's
@@ -169,12 +169,54 @@ Observability pages show what the agent did:
   the contact wrote them. A pass whose work failed is shown as an error, by its code alone.
 - **Logs**: the agent's log lines from `info` up, with the same codes and fields it prints
   (`webhook_accepted`, `replied`, `agent_turn_cap`, and so on), each in its trace. A hit that draws
-  no model call, such as a bad signature, a turn cap, the hourly limit or a contact the agent does
-  not answer, shows here too. Mastra's own lines are printed and not kept.
+  no model call, such as a turn cap, the hourly limit or a contact the agent does not answer, shows
+  here too. Mastra's own lines are printed and not kept.
+
+Anyone who can reach the webhook can post to it, so a hit the agent refuses or has seen gets no trace
+and no line of its own: one with no signature or a bad one, a body over 64 KiB or one that could not
+be read, a signed body that is not an envelope, an event id already handled, and every hit while
+`HDTP_WEBHOOK_SECRET` is unset. They are counted by their code, and the counts are logged as one line,
+`webhook_untraced` (for example `{"level":"warn","code":"webhook_untraced","bad_signature":3}`), at
+most once a minute and only when there is one.
 
 Both are held in the agent's memory only. Nothing is written to disk, and a restart empties both.
 Every minute a sweep deletes the traces that started more than 24 hours ago, and with each one its
 log lines.
+
+## In a container, beside the node
+
+`make image VERSION=x.y.z` builds the image `ghcr.io/humandelegatedtrustprotocol/hdtp-gateway-agent`,
+tagged `x.y.z` and `latest`, for linux/amd64 and linux/arm64, from a clean tree at the tag
+`vx.y.z` only; `PUSH=1` pushes both tags. It runs `mastra build`'s server with `node`, as the user
+`node`, with `MASTRA_TELEMETRY_DISABLED=1`. It has no Studio: `mastra build` bundles Studio only
+with `--studio`, so the image serves the webhook and Mastra's `/api` routes, on port 4111 of every
+interface of the container (`MASTRA_HOST=0.0.0.0`; outside the image the server binds 127.0.0.1
+unless `MASTRA_HOST` names another address).
+
+`compose.agent.yaml` adds the agent to the node's own compose project. In the directory of the node's
+`compose.yaml`, put `compose.agent.yaml`, an `agent.env` made from `.env.example` (the model's key,
+`HDTP_OWNER_TOKEN`, `HDTP_WEBHOOK_SECRET`), and the persona as `persona.md`; Compose reads every
+relative path from there. Then:
+
+```sh
+docker compose -f compose.yaml -f compose.agent.yaml up -d
+```
+
+and add the endpoint `http://agent:4111/hdtp/webhook` on the portal's Webhooks page. The compose file
+sets the data directory (`/data`, the `agent-data` volume, so `first-start.json` outlives a recreated
+container), the persona's path and the owner MCP's address over what `agent.env` says.
+
+- **The owner MCP.** The node serves it on its own loopback only and refuses a request that names
+  any other host, so `http://hdtp-gateway:8081/owner/mcp` is refused (403). A forwarder,
+  `agent-owner-mcp`, shares the agent's network namespace and listens on its 127.0.0.1:8080; it
+  dials the node's portal forwarder, which dials the node's loopback. Recreate the two together,
+  with the `up -d` above: recreating `agent` alone leaves the forwarder joined to the old container,
+  and the agent logs `reconcile_failed` (`connect:node_unreachable`) until the next `up -d`.
+- **Who reaches port 4111.** It is published nowhere, so nothing outside the compose project reaches
+  it. Inside the project, Mastra's `/api` routes ask for no credential, and the host rule is a
+  browser's defence only: a container of the project that names `127.0.0.1:4111` in its Host header is
+  answered, the persona and every trace included. The compose project is the boundary: run nothing in
+  it that you would not give the agent's model key and the owner's conversations.
 
 Work in progress: the full README follows.
 

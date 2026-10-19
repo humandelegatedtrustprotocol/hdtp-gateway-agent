@@ -43,6 +43,11 @@ export function studioHosts(env: NodeJS.ProcessEnv = process.env): string[] {
   return [`localhost:${port}`, `127.0.0.1:${port}`]
 }
 
+/** The address the server binds: MASTRA_HOST when it names one, else the loopback interface. */
+export function bindHost(env: NodeJS.ProcessEnv = process.env): string {
+  return env.MASTRA_HOST?.trim() || '127.0.0.1'
+}
+
 /** Studio's two origins: the same two addresses. */
 export function studioOrigins(env: NodeJS.ProcessEnv = process.env): string[] {
   return studioHosts(env).map((host) => `http://${host}`)

@@ -256,7 +256,7 @@ describe('the served process under `mastra dev`', () => {
 })
 
 describe("the CLI's reading of the entry file", () => {
-  it('binds the loopback interface whatever MASTRA_HOST says', async () => {
+  it('binds the address MASTRA_HOST names', async () => {
     const { server, url } = await serve(new FakeNode())
     const vars = { ...hdtpEnv(url), MASTRA_HOST: '0.0.0.0' }
     const saved = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]))
@@ -264,7 +264,7 @@ describe("the CLI's reading of the entry file", () => {
     Object.assign(process.env, vars)
     try {
       const { mastra } = await import('../src/mastra/index.ts')
-      expect(mastra.getServer()?.host).toBe('127.0.0.1')
+      expect(mastra.getServer()?.host).toBe('0.0.0.0')
     } finally {
       for (const [k, v] of Object.entries(saved)) {
         if (v === undefined) delete process.env[k]

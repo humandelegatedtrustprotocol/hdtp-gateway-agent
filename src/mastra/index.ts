@@ -1,7 +1,8 @@
 // The Mastra project: the delegate agent, and the node's webhook on Mastra's own server.
-// `mastra dev` serves it on the loopback interface only, whatever MASTRA_HOST says: Studio and
-// Mastra's /api routes ask for no credential, so they are not offered to the network. Studio
-// opens at http://localhost:4111 or http://127.0.0.1:4111 (another port if PORT names one, or if
+// The server binds the loopback interface only, unless MASTRA_HOST names another address (the
+// image sets 0.0.0.0, so the node's container can post to it): Studio and Mastra's /api routes ask
+// for no credential, so they are offered to the network only when the owner asks. Studio opens at
+// http://localhost:4111 or http://127.0.0.1:4111 (another port if PORT names one, or if
 // `mastra dev` finds 4111 taken); MASTRA_AUTO_DETECT_URL=true, set by the npm scripts and the
 // Makefile, has it call its API at the address it was opened at.
 
@@ -14,7 +15,7 @@ import { readConfig } from '../hdtp/config.ts'
 import { receive, startRuntime } from '../hdtp/runtime.ts'
 import { delegate } from './agents/delegate.ts'
 import { observe } from './observe.ts'
-import { STUDIO_ORIGINS, studioHostsOnly, studioWritesOnly } from './origins.ts'
+import { STUDIO_ORIGINS, bindHost, studioHostsOnly, studioWritesOnly } from './origins.ts'
 import { startSweep } from './retention.ts'
 
 export const mastra = new Mastra({
@@ -39,7 +40,7 @@ export const mastra = new Mastra({
     },
   }),
   server: {
-    host: '127.0.0.1',
+    host: bindHost(),
     // Studio's two addresses only, not Mastra's default `*`: a page of any other origin is given no
     // Access-Control-Allow-Origin, so the browser keeps the answer from it, and its writes are
     // refused (origins.ts).

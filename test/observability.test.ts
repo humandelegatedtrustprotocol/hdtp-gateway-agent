@@ -15,6 +15,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { FIRST_START_FILE } from '../src/hdtp/first-start.ts'
 import { receive } from '../src/hdtp/runtime.ts'
 import { SIGNATURE_HEADER } from '../src/hdtp/signature.ts'
+import { observe } from '../src/mastra/observe.ts'
 import { KEEP_MS, sweep } from '../src/mastra/retention.ts'
 import { FakeNode, envelope, reply, sign } from './fakes.ts'
 import { TOKEN, serve } from './wire.ts'
@@ -168,30 +169,43 @@ describe("the entry file's Mastra instance", () => {
     expect(lines.sort()).toEqual(['replied', 'webhook_accepted'])
   })
 
-  it('keeps each hit that draws no model call as a trace of its own, at info and at warn', async () => {
-    // One the receiver logs at info (a signed event it does not act on), one at warn (a bad signature).
+  it('keeps a signed hit that draws no model call as a trace of its own', async () => {
     const event = envelope('evt_observability', 'message.delivered', {})
     expect((await post(event)).status).toBe(200)
-    expect((await post(event, false)).status).toBe(401)
     await mastra.observability.flush()
-    const logs = await allLogs(await store())
-    const ignored = logs.find((l) => l.message === 'webhook_ignored')
-    const bad = logs.find((l) => l.message === 'webhook_bad_signature')
+    const ignored = (await allLogs(await store())).find((l) => l.message === 'webhook_ignored')
     expect(ignored).toMatchObject({ level: 'info', data: { event_id: 'evt_observability', type: 'message.delivered' } })
-    expect(bad).toMatchObject({ level: 'warn', data: null })
-    expect(ignored?.traceId).not.toBe(bad?.traceId)
     expect(await rootsOf('webhook_ignored')).toEqual(['webhook'])
-    expect(await rootsOf('webhook_bad_signature')).toEqual(['webhook'])
   })
 
-  it('marks the span of a hit that failed as an error, by its code and never its text', async () => {
-    // A body that cannot be read: the receiver rejects, and the route answers 500.
+  it('keeps nothing of a hit refused before its delivery is verified and new', async () => {
+    const s = await store()
+    // The webhook's traces and lines only: the wait loops' passes go on meanwhile.
+    const kept = async () => {
+      await mastra.observability.flush()
+      const traces = (await s.listTraces({})).spans.filter((t) => t.name === 'webhook')
+      const logs = (await allLogs(s)).filter((l) => l.message.startsWith('webhook'))
+      return { traces: traces.length, logs: logs.length }
+    }
+    const before = await kept()
+    const event = envelope('evt_unkept', 'message.delivered', {})
+    // Unsigned, a body that cannot be read, and a signed delivery posted again.
+    expect((await post(event, false)).status).toBe(401)
     const body = new ReadableStream({ pull: (c) => c.error(new Error('what a contact wrote')) })
-    const req = new Request('http://127.0.0.1/hdtp/webhook', { method: 'POST', body, duplex: 'half' } as RequestInit)
-    await expect(receive(req)).rejects.toThrow('what a contact wrote')
+    const unreadable = new Request('http://127.0.0.1/hdtp/webhook', { method: 'POST', body, duplex: 'half' } as RequestInit)
+    expect((await receive(unreadable)).status).toBe(400)
+    expect((await post(event)).status).toBe(200)
+    expect((await post(event)).status).toBe(200)
+    // The first signed post is a trace with its line; the three others, nothing.
+    expect(await kept()).toEqual({ traces: before.traces + 1, logs: before.logs + 1 })
+  })
+
+  it('marks a span whose work failed as an error, by its code and never its text', async () => {
+    const { trace } = observe(mastra)
+    await expect(trace('failing_pass', () => Promise.reject(new Error('what a contact wrote')))).rejects.toThrow()
     await mastra.observability.flush()
     const s = await store()
-    const failed = (await s.listTraces({})).spans.filter((t) => t.name === 'webhook' && t.error)
+    const failed = (await s.listTraces({})).spans.filter((t) => t.name === 'failing_pass')
     expect(failed.map((t) => [t.status, t.error])).toEqual([['error', { message: 'unexpected', name: 'Error' }]])
     const stored = JSON.stringify(await s.getTrace({ traceId: failed[0]!.traceId }))
     expect(stored).not.toContain('what a contact wrote')

@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_MODEL, readConfig } from '../src/hdtp/config.ts'
 import { FRAME } from '../src/hdtp/prompt.ts'
 import { delegate, instructions } from '../src/mastra/agents/delegate.ts'
-import { studioHosts, studioOrigins } from '../src/mastra/origins.ts'
+import { bindHost, studioHosts, studioOrigins } from '../src/mastra/origins.ts'
 
 describe('the delegate agent', () => {
   it('is given no tools', async () => {
@@ -119,5 +119,11 @@ describe("Studio's hosts and origins", () => {
     expect(studioHosts({ PORT: '4300' })).toEqual(['localhost:4300', '127.0.0.1:4300'])
     expect(studioOrigins({})).toEqual(['http://localhost:4111', 'http://127.0.0.1:4111'])
     expect(studioOrigins({ PORT: '4300' })).toEqual(['http://localhost:4300', 'http://127.0.0.1:4300'])
+  })
+
+  it('are served on the loopback interface unless MASTRA_HOST names another address', () => {
+    expect(bindHost({})).toBe('127.0.0.1')
+    expect(bindHost({ MASTRA_HOST: ' ' })).toBe('127.0.0.1')
+    expect(bindHost({ MASTRA_HOST: '0.0.0.0' })).toBe('0.0.0.0')
   })
 })
