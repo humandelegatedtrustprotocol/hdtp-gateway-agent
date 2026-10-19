@@ -1,8 +1,9 @@
 // The Mastra project: the delegate agent, and the node's webhook on Mastra's own server.
 // `mastra dev` serves it on the loopback interface only, whatever MASTRA_HOST says: Studio and
 // Mastra's /api routes ask for no credential, so they are not offered to the network. Studio
-// opens at http://localhost:4111 or http://127.0.0.1:4111; MASTRA_AUTO_DETECT_URL=true, set by
-// the npm scripts and the Makefile, has it call its API at the address it was opened at.
+// opens at http://localhost:4111 or http://127.0.0.1:4111 (PORT moves both);
+// MASTRA_AUTO_DETECT_URL=true, set by the npm scripts and the Makefile, has it call its API at the
+// address it was opened at.
 
 import './telemetry.ts'
 import { Mastra } from '@mastra/core'

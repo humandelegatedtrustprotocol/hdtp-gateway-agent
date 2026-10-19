@@ -30,6 +30,8 @@ as stable, then read `npm audit` again.
 - **Why it does not apply.**
   - Only `argparse` calls sprintf-js, and only `js-yaml`'s command-line script
     (`bin/js-yaml.js`) requires `argparse`. The library that `gray-matter` loads does not.
-  - `@mastra/core` calls `gray-matter` only to read the front matter of skill files
-    (`extractSkillFrontmatter`). This agent is given no workspace and no skills.
+  - `@mastra/core` calls `gray-matter` only for skills: it reads a skill file's front matter
+    (`extractSkillFrontmatter`), and it writes the SKILL.md of an inline skill
+    (`InlineSkillSource`, with `matter.stringify`). This agent is given no workspace and no
+    skills.
   - The format strings `argparse` passes are its own constants, never input.

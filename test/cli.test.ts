@@ -123,16 +123,18 @@ describe('the served process under `mastra dev`', () => {
       expect(node.calls.filter((c) => c === 'list_accounts')).toHaveLength(1)
     }))
 
-  it("answers /api to Studio's two origins, and gives any other origin no Access-Control-Allow-Origin", () =>
+  it("answers /api to Studio's two origins on the port it binds, and gives any other origin no Access-Control-Allow-Origin", () =>
     showing(async () => {
+      // A port of its own, not the default: Studio's origins follow it, and 4111's are any other.
+      expect(port).not.toBe(4111)
       const api = `http://127.0.0.1:${port}/api/agents`
       const allowed = (res: Response) => res.headers.get('access-control-allow-origin')
-      for (const origin of ['http://localhost:4111', 'http://127.0.0.1:4111']) {
+      for (const origin of [`http://localhost:${port}`, `http://127.0.0.1:${port}`]) {
         const res = await fetch(api, { headers: { Origin: origin } })
         expect(res.status, origin).toBe(200)
         expect(allowed(res), origin).toBe(origin)
       }
-      for (const origin of ['https://example.com', 'http://localhost:4199', 'null']) {
+      for (const origin of ['https://example.com', 'http://localhost:4111', 'http://127.0.0.1:4111', 'null']) {
         const res = await fetch(api, { headers: { Origin: origin } })
         expect(allowed(res), origin).toBeNull()
         // The preflight a browser sends before a cross-origin POST with a JSON body.
@@ -158,7 +160,7 @@ describe('the served process under `mastra dev`', () => {
         for (const [k, v] of Object.entries(change)) f.append(k, v)
         return f
       }
-      for (const origin of ['https://example.com', 'http://localhost:4199', 'null']) {
+      for (const origin of ['https://example.com', 'http://localhost:4111', 'http://127.0.0.1:4111', 'null']) {
         // A multipart form, and text/plain whose content type names JSON in a parameter: Mastra
         // reads both as the body, and a browser sends both without asking first.
         for (const init of [
@@ -175,12 +177,12 @@ describe('the served process under `mastra dev`', () => {
       const studio = { 'Content-Type': 'application/json' }
       const set = await fetch(`${api}/model`, {
         method: 'POST',
-        headers: { ...studio, Origin: 'http://localhost:4111' },
+        headers: { ...studio, Origin: `http://localhost:${port}` },
         body: JSON.stringify({ provider: 'openrouter', modelId: 'studio/choice' }),
       })
       expect(set.status).toBe(200)
       expect(await model()).toBe('openrouter/studio/choice')
-      const reset = await fetch(`${api}/model/reset`, { method: 'POST', headers: { ...studio, Origin: 'http://127.0.0.1:4111' }, body: '{}' })
+      const reset = await fetch(`${api}/model/reset`, { method: 'POST', headers: { ...studio, Origin: `http://127.0.0.1:${port}` }, body: '{}' })
       expect(reset.status).toBe(200)
       expect(await model()).toBe(before)
     }))
