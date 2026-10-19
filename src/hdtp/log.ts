@@ -45,3 +45,12 @@ export type Trace = <T>(name: string, fn: () => Promise<T>) => Promise<T>
 
 /** No spans: the runtime's tracer where nothing records traces. */
 export const untraced: Trace = (_name, fn) => fn()
+
+/**
+ * Marks the span open now, if one is, as failed by `code`, and leaves it open: for work that ends in
+ * a failure it logs rather than throws (a turn given up), which a span's own end would show as OK.
+ */
+export type Fail = (code: string) => void
+
+/** No spans to mark: the runtime's marker where nothing records traces. */
+export const unmarked: Fail = () => {}

@@ -7,8 +7,8 @@ import { threadPrompt, type ThreadContext } from '../src/hdtp/prompt.ts'
 import { FIRST_TURNS } from '../src/hdtp/responder.ts'
 import type { Turn } from '../src/hdtp/turn.ts'
 
-/** The most model calls one run of the eval makes: 10 points, 5 runs each. */
-export const CEILING = 50
+/** The most model calls one run of the eval makes: 11 points, 5 runs each. */
+export const CEILING = 55
 
 export type Persona = 'ana' | 'ben' | 'clinic' | 'patient'
 
@@ -59,6 +59,14 @@ const DENTIST: Line[] = [
   ['clinic', 'agent', "Booked: Jo's check-up is on Tuesday at 10:00, for 45 minutes. See you then!"],
 ]
 
+// The U1 dry run's thread (2026-10-20) up to Ana's ask: Ben's agent counters her agent's offer with
+// a definite time and the agenda, which wait on Ana's final yes. Her ask was refused there, twice.
+const COUNTER: Line[] = [
+  ['ben', 'human', 'Can we meet this week?'],
+  ['ana', 'agent', 'Sure\u2014could we meet for up to 30 minutes on Wednesday, Thursday afternoon, or Friday? I\u2019ll put the budget first on the agenda. What time works for you?'],
+  ['ben', 'agent', 'Wednesday 14:00\u201314:30 works for me. Please include both the budget and timeline on the agenda.'],
+]
+
 /** The first `n` lines of a story as `me`'s node lists them: its own lines out, the other side's in. */
 function seen(story: Line[], me: Persona, n: number): ThreadMessage[] {
   return story.slice(0, n).map(([side, sender, body], i) => ({
@@ -98,6 +106,7 @@ export const POINTS: Point[] = [
     messages: seen(MEETING, 'ben', 6),
     context: { notices: ['Meeting with Ana confirmed: Wed 15:00, 30 min'] },
   },
+  { id: 'u1-7', title: 'Ana on the agenda and time counter', persona: 'ana', expected: ['ask'], messages: seen(COUNTER, 'ana', 3), context: {} },
   { id: 'u5-1', title: "Clinic on the patient's request", persona: 'clinic', expected: ['reply'], messages: seen(DENTIST, 'clinic', 1), context: {} },
   // A confirmation is still to come from the clinic, so no notice yet.
   { id: 'u5-2', title: 'Patient on the offered slots', persona: 'patient', expected: ['reply'], messages: seen(DENTIST, 'patient', 2), context: {} },

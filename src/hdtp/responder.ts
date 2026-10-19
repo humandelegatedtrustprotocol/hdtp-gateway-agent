@@ -58,10 +58,14 @@
 // or send failed is therefore kept here and revisited by the next reconcile pass, up to
 // MAX_ATTEMPTS times; a process that stops in between loses it, because the node no longer
 // counts it unread. A request stays in list_pending until it is answered or expires, so each
-// reconcile pass reaches an unanswered one again.
+// reconcile pass reaches an unanswered one again. Each retry's prompt carries the previous
+// attempt's refusal, by code with this agent's line for it (refusals.ts), never the node's text.
+// The last failed attempt marks the span it runs in as failed, by its code; for a contact's
+// message it also puts one notice for the owner, fixed text written here (GAVE_UP_SURFACE), so a
+// turn given up still reaches them; a notice the node does not take is logged and not put again.
 
 import { createHash } from 'node:crypto'
-import type { Log } from './log.ts'
+import { unmarked, type Fail, type Log } from './log.ts'
 import {
   NodeRefusal,
   refusalCode,
@@ -73,6 +77,7 @@ import {
 } from './node.ts'
 import { Bounded } from './bounded.ts'
 import { requestPrompt, threadPrompt } from './prompt.ts'
+import { refusedOf, type Refused } from './refusals.ts'
 import { Budget } from './budget.ts'
 import type { Answer } from './config.ts'
 import { Turns, type Turn, type TurnType } from './turn.ts'
@@ -120,6 +125,25 @@ export function agentTurns(messages: readonly ThreadMessage[]): number {
   return turns
 }
 
+/**
+ * The notice put for a contact's message whose turn was given up, so the owner learns it waits on
+ * them: written here, never by the model, in the node's owner catalog (Column root, the TLDR Text).
+ */
+export const GAVE_UP_TLDR = "Waiting on you: I could not prepare an answer to the contact's latest message in this thread."
+export const GAVE_UP_SURFACE = [
+  { version: 'v0.9.1', createSurface: { surfaceId: 'gave-up', catalogId: 'https://hdtp.dev/a2ui/v0_9_1/catalogs/owner/catalog.json' } },
+  {
+    version: 'v0.9.1',
+    updateComponents: {
+      surfaceId: 'gave-up',
+      components: [
+        { id: 'root', component: 'Column', children: ['tldr'] },
+        { id: 'tldr', component: 'Text', text: GAVE_UP_TLDR },
+      ],
+    },
+  },
+] as const
+
 /** The trust flag of a contact this agent answers when it answers trusted contacts only. */
 export const TRUSTED = 'may_instruct'
 
@@ -137,6 +161,9 @@ export interface Rules {
   now: () => number
 }
 
+/** The node's rule, when a refusal names one (ask_owner's invalid_surface:<rule>), as a log field. */
+const nodeReason = (e: unknown): Record<string, string> => (e instanceof NodeRefusal && e.reason !== '' ? { node_reason: e.reason } : {})
+
 /** The budget's key for a contact of an account. */
 const contactKey = (accountId: string, contactFpr: string) => `${accountId}\0${contactFpr}`
 
@@ -151,6 +178,8 @@ export class Responder {
   private readonly seen = new Bounded<number>(REMEMBERED)
   /** Threads with an open ask, visited by each reconcile pass until it is not. */
   private readonly waiting = new Bounded<true>(REMEMBERED)
+  /** The last attempt's refusal per key that has not succeeded, told to the next attempt. */
+  private readonly refused = new Bounded<Refused>(REMEMBERED)
   /** Notices a turn chose that notify_owner has not taken yet, by thread, with the reply key they follow. */
   private readonly owed = new Bounded<{ key: string; args: SurfaceArgs }>(REMEMBERED)
   /** The owner's display name by account, as the read of it (nameOf): passes that meet share one. */
@@ -166,9 +195,12 @@ export class Responder {
   private readonly firstStart: number
   private readonly budget: Budget
   private readonly turns: Turns
+  private readonly fail: Fail
 
-  constructor(node: NodeClient, draft: Draft, log: Log, rules: Rules) {
+  /** `fail` marks the span a turn is given up in as failed (observe.ts). */
+  constructor(node: NodeClient, draft: Draft, log: Log, rules: Rules, fail: Fail = unmarked) {
     this.node = node
+    this.fail = fail
     this.turns = new Turns(node)
     this.draft = draft
     this.log = log
@@ -335,9 +367,9 @@ export class Responder {
       const notices = oldest.filter((a) => a.kind === 'notice').map((a) => a.tldr)
       const allowed = ask ? AFTER_ASK_TURNS : FIRST_TURNS
       const owner = await this.nameOf(accountId)
-      await this.attempt(key, where, ids, async () => {
-        const turn = await this.write(contact, threadPrompt(messages, schema, allowed, { ask, decisions, notices, owner }), allowed, owner)
-        const surface = { account_id: accountId, thread_id: row.thread_id, for_message_id: newest.message_id }
+      const surface = { account_id: accountId, thread_id: row.thread_id, for_message_id: newest.message_id }
+      const work = async (refused?: Refused) => {
+        const turn = await this.write(contact, threadPrompt(messages, schema, allowed, { ask, decisions, notices, owner, refused }), allowed, owner)
         const send = (text: string) =>
           this.node.sendToContact({ account_id: accountId, contact_fpr: row.contact_fpr, thread_id: row.thread_id, msg_id: key, text })
         switch (turn.type) {
@@ -363,8 +395,22 @@ export class Responder {
             this.log.info('no_reply', ids)
             return 'done'
         }
-      })
+      }
+      await this.attempt(key, where, ids, work, () => this.tellGaveUp(surface, ids))
     })
+  }
+
+  /**
+   * Tells the owner that a contact's message waits on them, its turn given up: one notice, fixed
+   * text, put once; a notice the node does not take is logged by code, and not put again.
+   */
+  private async tellGaveUp(surface: SurfaceArgs, ids: Record<string, string>): Promise<void> {
+    try {
+      await this.node.notifyOwner({ surface: GAVE_UP_SURFACE, ...surface })
+      this.log.info('gave_up_notified', ids)
+    } catch (e) {
+      this.log.warn('gave_up_notice_failed', { ...ids, reason: refusalCode(e), ...nodeReason(e) })
+    }
   }
 
   /**
@@ -397,8 +443,8 @@ export class Responder {
         return
       }
       const schema = await this.turns.schema()
-      await this.attempt(key, null, { request_id: row.ID }, async () => {
-        const turn = (await this.write(contact, requestPrompt(row, schema), ['reply'])) as Extract<Turn, { type: 'reply' }>
+      await this.attempt(key, null, { request_id: row.ID }, async (refused) => {
+        const turn = (await this.write(contact, requestPrompt(row, schema, refused), ['reply'])) as Extract<Turn, { type: 'reply' }>
         await this.node.answerRequest({ account_id: accountId, request_id: row.ID, result: turn.text })
         this.log.info('answered', { request_id: row.ID })
         return 'done'
@@ -453,13 +499,16 @@ export class Responder {
   /**
    * Runs one attempt for a key, counting it, and keeps the thread to revisit while attempts remain.
    * Work that ends 'waiting' (an ask put) leaves the key unanswered, for the thread to be drafted
-   * for again once the ask is no longer open.
+   * for again once the ask is no longer open. Work is handed the previous attempt's refusal, when it
+   * had one this agent can explain (refusals.ts). The last failed attempt marks the span it runs in
+   * as failed, by its code, and then runs `gaveUp`.
    */
   private async attempt(
     key: string,
     where: string | null,
     ids: Record<string, string>,
-    work: () => Promise<'done' | 'waiting'>,
+    work: (refused?: Refused) => Promise<'done' | 'waiting'>,
+    gaveUp?: () => Promise<void>,
   ): Promise<void> {
     const n = (this.attempts.get(key) ?? 0) + 1
     if (n > MAX_ATTEMPTS) {
@@ -468,17 +517,23 @@ export class Responder {
     }
     this.attempts.set(key, n)
     try {
-      if ((await work()) === 'done') this.done.set(key, true)
+      if ((await work(this.refused.get(key))) === 'done') this.done.set(key, true)
       this.attempts.delete(key)
+      this.refused.delete(key)
       if (where) this.revisit.delete(where)
     } catch (e) {
       const last = n >= MAX_ATTEMPTS
-      // The node's rule, when it names one (ask_owner's invalid_surface:<rule>), beside the refusal.
-      const rule: Record<string, string> = e instanceof NodeRefusal && e.reason !== '' ? { node_reason: e.reason } : {}
-      this.log.warn(last ? 'gave_up' : 'attempt_failed', { ...ids, reason: refusalCode(e), ...rule, attempt: n })
+      this.log.warn(last ? 'gave_up' : 'attempt_failed', { ...ids, reason: refusalCode(e), ...nodeReason(e), attempt: n })
+      const refused = last ? null : refusedOf(e)
+      if (refused) this.refused.set(key, refused)
+      else this.refused.delete(key)
       if (where) {
         if (last) this.revisit.delete(where)
         else this.revisit.set(where, true)
+      }
+      if (last) {
+        this.fail(refusalCode(e))
+        await gaveUp?.()
       }
     }
   }

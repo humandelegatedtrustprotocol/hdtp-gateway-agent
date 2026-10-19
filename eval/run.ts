@@ -5,7 +5,7 @@
 // valid. Every call is one model call, never retried; one line of JSON per call goes to stdout,
 // for reading the ready replies, and the summary to stderr.
 //
-//   make eval                       5 runs of every point: 50 calls, the most one run makes
+//   make eval                       5 runs of every point: 55 calls, the most one run makes
 //   make eval EVAL='--runs 1 --only u1-3,u1-4'
 //   make eval EVAL=--dry            builds every prompt and calls no model
 

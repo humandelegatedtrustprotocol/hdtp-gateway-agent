@@ -15,7 +15,7 @@ const conversation = (prompt: string) => JSON.parse(prompt.split('```')[1]!.repl
 describe('the turn eval', () => {
   it('drafts for a contact’s newest message at every point, with a persona that exists and turns that are offered', async () => {
     const schema = await turns.schema()
-    expect(POINTS).toHaveLength(10)
+    expect(POINTS).toHaveLength(11)
     for (const p of POINTS) {
       expect(p.messages.at(-1)!.direction, p.id).toBe('in')
       expect(existsSync(PERSONAS[p.persona]), p.id).toBe(true)
@@ -39,11 +39,11 @@ describe('the turn eval', () => {
   })
 
   it('makes at most CEILING calls a run', () => {
-    expect(plan(5)).toHaveLength(10)
+    expect(plan(5)).toHaveLength(11)
     expect(POINTS.length * 5).toBe(CEILING)
-    expect(() => plan(6)).toThrow(/over 50 calls/)
+    expect(() => plan(6)).toThrow(/over 55 calls/)
     expect(() => plan(0)).toThrow()
-    expect(plan(50, ['u1-3'])).toHaveLength(1)
+    expect(plan(55, ['u1-3'])).toHaveLength(1)
     expect(() => plan(1, ['u9-9'])).toThrow(/unknown point/)
   })
 
@@ -51,6 +51,6 @@ describe('the turn eval', () => {
     const run = spawnSync(process.execPath, ['eval/run.ts', '--dry'], { env: { ...process.env, OPENROUTER_API_KEY: '' }, encoding: 'utf8' })
     expect(run.status, run.stderr).toBe(0)
     expect(run.stdout).toBe('')
-    expect(run.stderr).toMatch(/^dry: 10 points x 5 runs = 50 calls/)
+    expect(run.stderr).toMatch(/^dry: 11 points x 5 runs = 55 calls/)
   })
 })

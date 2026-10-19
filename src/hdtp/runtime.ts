@@ -25,7 +25,7 @@
 import type { Agent } from '@mastra/core/agent'
 import { getCurrentSpan } from '@mastra/core/observability/context-storage'
 import type { Config } from './config.ts'
-import { consoleLog, untraced, type Fields, type Log, type Trace } from './log.ts'
+import { consoleLog, unmarked, untraced, type Fail, type Fields, type Log, type Trace } from './log.ts'
 import { FirstStartUnreadable, firstStart } from './first-start.ts'
 import { NodeRefusal, TOOLS_CALLED, connectNode, refusalCode, type NodeClient } from './node.ts'
 import { Responder, type Draft } from './responder.ts'
@@ -66,9 +66,10 @@ export function receive(req: Request): Promise<Response> {
 
 /**
  * Starts the runtime once; the function returned stops its loops and its timers. Each webhook hit,
- * reconcile pass and wait loop's pass runs in a span of `trace`'s.
+ * reconcile pass and wait loop's pass runs in a span of `trace`'s; `fail` marks the span a turn is
+ * given up in as failed.
  */
-export function startRuntime(config: Config, agent: Agent, log: Log = consoleLog, trace: Trace = untraced): () => void {
+export function startRuntime(config: Config, agent: Agent, log: Log = consoleLog, trace: Trace = untraced, fail: Fail = unmarked): () => void {
   if (receiver) return () => {}
   let responder: Responder | null = null
   let stop = () => {}
@@ -98,7 +99,7 @@ export function startRuntime(config: Config, agent: Agent, log: Log = consoleLog
       repliesPerHour: config.repliesPerHour,
       firstStart: since,
       now,
-    })
+    }, fail)
     const watcher = new Watcher(node, (accountId) => trace('watch_pass', () => r.reconcileAccount(accountId)), log)
     let sweeping = false
     let failures = 0
