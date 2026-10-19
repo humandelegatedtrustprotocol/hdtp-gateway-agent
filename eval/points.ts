@@ -19,6 +19,14 @@ export const PERSONAS: Record<Persona, string> = {
   patient: 'examples/personas/u5-dentist-patient.md',
 }
 
+/** The display name on each persona's card, as the responder reads it from export_card. */
+export const OWNERS: Record<Persona, string> = {
+  ana: 'Ana',
+  ben: 'Ben',
+  clinic: 'Larchmere Dental',
+  patient: 'Jo',
+}
+
 /** What a turn must be to pass at a point. */
 export type Expect = 'reply' | 'ask' | 'none' | 'notify' | 'notify+reply'
 
@@ -99,7 +107,7 @@ export const POINTS: Point[] = [
 
 /** The prompt the responder would write for the point: the first turn on its newest message. */
 export function promptFor(point: Point, schema: JsonSchema): string {
-  return threadPrompt(point.messages, schema, FIRST_TURNS, point.context)
+  return threadPrompt(point.messages, schema, FIRST_TURNS, { ...point.context, owner: OWNERS[point.persona] })
 }
 
 /** Whether a turn passes at a point. */

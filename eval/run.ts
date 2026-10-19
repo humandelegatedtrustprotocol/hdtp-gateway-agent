@@ -19,7 +19,7 @@ import { FIRST_TURNS } from '../src/hdtp/responder.ts'
 import { drafter } from '../src/hdtp/runtime.ts'
 import { Turns, type Turn } from '../src/hdtp/turn.ts'
 import { instructions } from '../src/mastra/agents/delegate.ts'
-import { PERSONAS, passes, plan, promptFor, type Persona } from './points.ts'
+import { OWNERS, PERSONAS, passes, plan, promptFor, type Persona } from './points.ts'
 
 const { values } = parseArgs({
   options: { runs: { type: 'string', default: '5' }, only: { type: 'string' }, dry: { type: 'boolean', default: false } },
@@ -75,7 +75,7 @@ for (let run = 1; run <= runs; run++) {
     let refusal: string | null = null
     try {
       text = await draft(prompts.get(point.id)!)
-      turn = await turns.read(text, FIRST_TURNS)
+      turn = await turns.read(text, FIRST_TURNS, OWNERS[point.persona])
     } catch (e) {
       refusal = e instanceof NodeRefusal ? `${e.tool}:${e.code}` : 'model_failed'
     }

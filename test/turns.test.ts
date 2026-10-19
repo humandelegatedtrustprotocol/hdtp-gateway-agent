@@ -5,7 +5,7 @@ import { toStandardSchema } from '@mastra/core/schema'
 import { describe, expect, it } from 'vitest'
 import { nodeClientOver, type NodeClient } from '../src/hdtp/node.ts'
 import { FIRST_TURNS, MAX_ATTEMPTS, Responder, type Draft, type Rules } from '../src/hdtp/responder.ts'
-import { FILLED_BY_CODE, Turns, turnSchema } from '../src/hdtp/turn.ts'
+import { FILLED_BY_CODE, Turns, names, readyReplies, turnSchema } from '../src/hdtp/turn.ts'
 import { FakeNode, TOOLS, ask, memoryLog, none, notify, reply, rules, surface } from './fakes.ts'
 
 function setup(draft: Draft, over: Partial<Rules> = {}) {
@@ -93,7 +93,7 @@ describe('ask', () => {
     expect(prompts).toHaveLength(2)
     expect(conversation(prompts[1]!).map((m) => [m.from, m.text])).toEqual([
       ['contact', 'Can we lock in Wednesday 15:00?'],
-      ['person', 'Confirm Wed 15:00'],
+      ['Ana Owner', 'Confirm Wed 15:00'],
       ['contact', 'Booked: Wednesday 15:00, 30 minutes.'],
     ])
     expect(node.sent).toEqual([])
@@ -125,7 +125,7 @@ describe('ask', () => {
       async (name, args) => (name === 'list_asks' ? { content: [{ type: 'text', text: '[]' }] } : node.call(name, args)),
       node.catalog,
     )
-    await expect(bare.listAsks('acct-1', { open: true })).rejects.toMatchObject({ tool: 'list_asks', code: 'unreadable_answer' })
+    await expect(bare.listAsks('acct-1', 'th1')).rejects.toMatchObject({ tool: 'list_asks', code: 'unreadable_answer' })
   })
 
   it('holds only its own thread: another contact is answered while the ask is open', async () => {
@@ -195,22 +195,49 @@ describe('ask', () => {
 describe('whose message it is', () => {
   // Observed on U1 (2026-10-19): Ana typed her yes in the portal, the thread showed it as "you", and
   // her agent answered Ben's confirmation with "Ana will confirm the time herself".
-  it('shows the person’s own message as theirs, and their yes as settled, not one still to come', async () => {
-    const { node, prompts, responder } = setup(async () => none())
-    node.inbound('th1', 'Can we meet Wednesday 15:00 for 30 minutes?', 'agent')
-    node.outbound('th1', 'Let me check with Ana and come back to you.', 'agent')
-    node.outbound('th1', 'Yes, that works for me. Confirmed.', 'human')
-    node.inbound('th1', 'Great, Wednesday 15:00 it is.', 'agent')
+  it('shows the person’s own message as theirs, by their card’s name, and their yes as settled, not one still to come', async () => {
+    for (const [name, label] of [
+      ['Ana Owner', 'Ana Owner'],
+      ['', 'person'],
+      ['you', 'person'],
+    ] as const) {
+      const { node, prompts, responder } = setup(async () => none())
+      node.displayName = name
+      node.inbound('th1', 'Can we meet Wednesday 15:00 for 30 minutes?', 'agent')
+      node.outbound('th1', 'Let me check with Ana and come back to you.', 'agent')
+      node.outbound('th1', 'Yes, that works for me. Confirmed.', 'human')
+      node.inbound('th1', 'Great, Wednesday 15:00 it is.', 'agent')
+      await responder.onMessage('th1')
+      const prompt = prompts[0]!
+      expect(conversation(prompt).map((m) => [m.from, m.text]), name).toEqual([
+        ['contact', 'Can we meet Wednesday 15:00 for 30 minutes?'],
+        ['you', 'Let me check with Ana and come back to you.'],
+        [label, 'Yes, that works for me. Confirmed.'],
+        ['contact', 'Great, Wednesday 15:00 it is.'],
+      ])
+      const who = label === 'person' ? 'the person you act for' : `${label}, the person you act for,`
+      expect(prompt, name).toContain(`"${label}" for a message ${who} wrote themselves`)
+      expect(prompt).toContain('you never say they will still confirm or decide it')
+    }
+  })
+
+  it('reads the owner’s name once per account, and drafts on without it when the card cannot be read', async () => {
+    const { node, log, prompts, responder } = setup(async () => none())
+    node.failing.add('export_card')
+    node.inbound('th1', 'Hello?', 'agent')
+    node.outbound('th1', 'Hi, I am here.', 'human')
+    node.inbound('th1', 'Great.', 'agent')
+    await responder.reconcile()
+    expect(conversation(prompts[0]!)[1]!.from).toBe('person')
+    expect(log.lines.find((l) => l.code === 'owner_name_unread')?.fields).toMatchObject({ reason: 'export_card:internal' })
+    node.failing.delete('export_card')
+    node.inbound('th1', 'Still there?', 'agent')
+    await responder.reconcile()
+    await responder.reconcile()
     await responder.onMessage('th1')
-    const prompt = prompts[0]!
-    expect(conversation(prompt).map((m) => [m.from, m.text])).toEqual([
-      ['contact', 'Can we meet Wednesday 15:00 for 30 minutes?'],
-      ['you', 'Let me check with Ana and come back to you.'],
-      ['person', 'Yes, that works for me. Confirmed.'],
-      ['contact', 'Great, Wednesday 15:00 it is.'],
-    ])
-    expect(prompt).toContain('"person" for a message the person you act for wrote themselves')
-    expect(prompt).toContain('you never say they will still confirm or decide it')
+    expect(conversation(prompts[1]!)[1]!.from).toBe('Ana Owner')
+    expect(node.calls.filter((c) => c === 'export_card')).toHaveLength(3)
+    expect(log.lines.filter((l) => l.code === 'owner_name')).toEqual([{ code: 'owner_name', fields: { account_id: 'acct-1', named: true } }])
   })
 
   it('shows the person’s answers to the thread’s earlier asks as their decisions, and nothing else', async () => {
@@ -258,6 +285,7 @@ describe('notify', () => {
         thread_id: 'th1',
         for_message_id: node.threads.get('th1')!.messages[0]!.message_id,
         surface: surface('Booked: cleaning Tue 10:00', { When: 'Tue 10:00', With: 'Dr. Rao' }),
+        at: 1,
       },
     ])
     expect(codes(log).filter((c) => c === 'replied' || c === 'notified')).toEqual(['replied', 'notified'])
@@ -325,6 +353,58 @@ describe('notify', () => {
 })
 
 describe('the turn as the model wrote it', () => {
+  it('refuses an ask whose ready replies name the owner, and retries it', async () => {
+    const third = () => ask('Ben proposes Wed 15:00', { When: 'Wed 15:00' }, ['Wednesday 15:00 works for Ana.', 'Could we do Thursday instead?'])
+    const first = () => ask('Ben proposes Wed 15:00, for Ana Owner', { When: 'Wed 15:00' }, ['Wednesday 15:00 works for me.', 'Could we do Thursday instead?'])
+    const drafts = [third(), first()]
+    const { node, log, responder } = setup(async () => drafts.shift()!)
+    node.inbound('th1', 'How about Wednesday 15:00?', 'agent')
+    await responder.onMessage('th1')
+    expect(log.lines.find((l) => l.code === 'attempt_failed')?.fields).toMatchObject({ reason: 'draft:reply_names_owner' })
+    expect(node.asks).toEqual([])
+    // The retry names the owner only in the TLDR, which is for the owner and never sent.
+    await responder.reconcile()
+    expect(node.asks).toHaveLength(1)
+  })
+
+  it('reads the texts an ask would send, and the owner’s name in them as whole words', () => {
+    const surfaceOf = (a: string) => (JSON.parse(a) as { ask: unknown }).ask
+    expect(readyReplies(surfaceOf(ask('TLDR', { When: 'Wed' }, ['Yes.', 'No.'])))).toEqual(['Yes.', 'No.'])
+    const picker = { component: 'ChoicePicker', id: 'pick', options: [{ label: 'Thursday suits me.', value: 'thu' }], value: { path: '/pick' } }
+    expect(readyReplies([{ components: [picker] }])).toEqual(['Thursday suits me.'])
+    // The Send Button's event reads the field the owner writes in; it carries no reply text.
+    expect(readyReplies([{ name: 'answer', context: { reply: { path: '/own' } } }])).toEqual([])
+    expect(names('Wednesday works for ana.', 'Ana Owner')).toBe(true)
+    expect(names('Thursday suits Ana-Owner better.', 'Ana Owner')).toBe(true)
+    // A surname alone is often a word of its own: "I will" is not about Ben Will.
+    expect(names('I will send the agenda.', 'Ben Will')).toBe(false)
+    expect(names('An anagram of Wednesday.', 'Ana Owner')).toBe(false)
+    expect(names('Wednesday works for Ana.', '')).toBe(false)
+    expect(names('Wednesday works for me.', 'Ana')).toBe(false)
+  })
+
+  it('takes ready replies that name someone else when the owner’s card names no one', async () => {
+    const { node, responder } = setup(async () => ask('Ben proposes Wed 15:00', {}, ['Wednesday 15:00 works for Ana.']))
+    node.displayName = ''
+    node.inbound('th1', 'How about Wednesday 15:00?', 'agent')
+    await responder.onMessage('th1')
+    expect(node.asks).toHaveLength(1)
+  })
+
+  it('shows the thread’s decisions and notices oldest first, from a list the node gives newest first', async () => {
+    const { node, prompts, responder } = setup(async () => none())
+    node.inbound('th1', 'Shall we book?', 'agent')
+    const row = (id: string, at: number, kind: string, extra: Record<string, unknown>) =>
+      ({ id, kind, account: 'acct-1', contact: 'fpr-contact', thread_id: 'th1', for_message_id: `m-${id}`, status: 'answered', answer_text: '', tldr: '', surface: null, at, ...extra }) as (typeof node.asks)[number]
+    node.asks.push(row('a1', 1, 'ask', { answer_text: 'Ana chose: "Tuesday"' }), row('a2', 3, 'ask', { answer_text: 'Ana wrote: "Make it 10:00"' }))
+    node.notices.push({ account: 'acct-1', thread_id: 'th1', for_message_id: 'm-n1', surface: surface('Booked Tue', {}), at: 2 })
+    node.notices.push({ account: 'acct-1', thread_id: 'th1', for_message_id: 'm-n2', surface: surface('Moved to 10:00', {}), at: 4 })
+    await responder.onMessage('th1')
+    const block = (p: string, head: string) => JSON.parse(p.split(head)[1]!.split('```json\n')[1]!.split('\n```')[0]!) as string[]
+    expect(block(prompts[0]!, "The person's answers to your earlier asks")).toEqual(['Ana chose: "Tuesday"', 'Ana wrote: "Make it 10:00"'])
+    expect(block(prompts[0]!, 'The notices already given')).toEqual(['Booked Tue', 'Moved to 10:00'])
+  })
+
   it('is refused as invalid_turn when it is not JSON, or not one of the four, and is read inside one fenced block', async () => {
     for (const answer of ['Sure, Wednesday works!', '{"type":"maybe"}', '{"type":"reply"}', '{"type":"none","text":"bye"}']) {
       const { node, log, responder } = setup(async () => answer)
@@ -343,10 +423,11 @@ describe('the turn as the model wrote it', () => {
     const node = new FakeNode()
     const turns = new Turns(nodeClientOver(node.call, node.catalog))
     const withNull = JSON.parse(ask('Pick a day', { Slots: 'Tue, Wed' }, ['Tuesday'])) as { ask: { surface: Array<Record<string, any>> } }
-    const own = withNull.ask.surface[1]!.updateComponents.components.find((c: { id: string }) => c.id === 'own')
-    own.label = null
+    const send = withNull.ask.surface[1]!.updateComponents.components.find((c: { id: string }) => c.id === 'send')
+    const { variant: _v, ...bare } = { ...send }
+    send.variant = null
     const read = (await turns.read(JSON.stringify(withNull), FIRST_TURNS)) as unknown as { ask: { surface: Array<Record<string, any>> } }
-    expect(read.ask.surface[1]!.updateComponents.components.find((c: { id: string }) => c.id === 'own')).toEqual({ id: 'own', component: 'TextField' })
+    expect(read.ask.surface[1]!.updateComponents.components.find((c: { id: string }) => c.id === 'send')).toEqual(bare)
     const notice = JSON.parse(notify('Booked Tue 10:00', { When: 'Tue 10:00' })) as Record<string, unknown>
     expect(await turns.read(JSON.stringify({ ...notice, reply: null }), FIRST_TURNS)).toEqual(notice)
     for (const answer of [
@@ -357,11 +438,14 @@ describe('the turn as the model wrote it', () => {
     }
     // A null inside a list is not an optional field left out.
     const listed = JSON.parse(ask('Pick a day', { Slots: 'Tue, Wed' }, ['Tuesday'])) as { ask: { surface: Array<Record<string, any>> } }
-    listed.ask.surface[1]!.updateComponents.components.find((c: { id: string }) => c.id === 'pick').options.push(null)
+    listed.ask.surface[1]!.updateComponents.components.find((c: { id: string }) => c.id === 'terms').items.push(null)
     await expect(turns.read(JSON.stringify(listed), FIRST_TURNS)).rejects.toMatchObject({ code: 'invalid_turn' })
     const tldr = JSON.parse(ask('Pick a day', { Slots: 'Tue' }, ['Tuesday'])) as { ask: { surface: Array<Record<string, any>> } }
     tldr.ask.surface[1]!.updateComponents.components.find((c: { id: string }) => c.id === 'tldr').text = null
     await expect(turns.read(JSON.stringify(tldr), FIRST_TURNS)).rejects.toMatchObject({ code: 'invalid_turn' })
+    const label = JSON.parse(ask('Pick a day', { Slots: 'Tue' }, ['Tuesday'])) as { ask: { surface: Array<Record<string, any>> } }
+    label.ask.surface[1]!.updateComponents.components.find((c: { id: string }) => c.id === 'own').label = null
+    await expect(turns.read(JSON.stringify(label), FIRST_TURNS)).rejects.toMatchObject({ code: 'invalid_turn' })
   })
 
   it('keeps a null where the node’s schema takes one', async () => {

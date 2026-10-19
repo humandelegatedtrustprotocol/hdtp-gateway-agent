@@ -111,6 +111,37 @@ export function withoutNulls(value: unknown): unknown {
   return Object.fromEntries(Object.entries(value).flatMap(([k, v]) => (v === null ? [] : [[k, withoutNulls(v)]])))
 }
 
+/**
+ * The texts an ask would send to the contact as the owner's own message, as the node's ask_owner
+ * says: each ready reply Button's context.reply (an event named "reply"), and each option label of
+ * a ChoicePicker. Found by those shapes at any depth, so no component's place is assumed.
+ */
+export function readyReplies(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(readyReplies)
+  if (value === null || typeof value !== 'object') return []
+  const o = value as Record<string, unknown>
+  const own: string[] = []
+  const context = o.context as Record<string, unknown> | undefined
+  if (o.name === 'reply' && typeof context?.reply === 'string') own.push(context.reply)
+  if (o.component === 'ChoicePicker' && Array.isArray(o.options)) {
+    for (const option of o.options as Array<Record<string, unknown>>) if (typeof option?.label === 'string') own.push(option.label)
+  }
+  return [...own, ...Object.values(o).flatMap(readyReplies)]
+}
+
+/**
+ * Whether `text` names `owner`: their first name or their whole name, as whole words in any case;
+ * never for no name. The other words of a name are left out, since a surname can be a common word
+ * ("Will", "Dental") that a first-person reply holds for its own sake.
+ */
+export function names(text: string, owner: string): boolean {
+  const words = (t: string) => t.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean)
+  const name = words(owner)
+  if (name.length === 0) return false
+  const said = ` ${words(text).join(' ')} `
+  return said.includes(` ${name[0]} `) || said.includes(` ${name.join(' ')} `)
+}
+
 /** Reads turns against the node's schema, which is read once and kept. */
 export class Turns {
   private readonly node: Pick<NodeClient, 'toolSchema'>
@@ -141,9 +172,11 @@ export class Turns {
    * and is not offered here. An answer the schema refuses is checked once more without its null
    * properties: a null on an optional field is read as the field left out, and a null on a required
    * one is still refused, as the field missing. Where the schema takes a null, the answer passes as
-   * written. The validator's text is never kept.
+   * written. The validator's text is never kept. With `owner`, the person's display name, an ask
+   * whose ready replies name them is refused (draft:reply_names_owner): a ready reply is their own
+   * message, and one that names them speaks of them in the third person.
    */
-  async read(answer: string, allowed: readonly TurnType[]): Promise<Turn> {
+  async read(answer: string, allowed: readonly TurnType[], owner = ''): Promise<Turn> {
     const { check } = await this.build()
     const value = parse(answer)
     let result = await check['~standard'].validate(value)
@@ -153,6 +186,9 @@ export class Turns {
     if (!allowed.includes(turn.type)) throw new NodeRefusal('draft', 'turn_not_allowed')
     if ((turn.type === 'reply' && !turn.text.trim()) || (turn.type === 'notify' && turn.reply !== undefined && !turn.reply.trim())) {
       throw new NodeRefusal('draft', 'empty')
+    }
+    if (turn.type === 'ask' && readyReplies(turn.ask).some((text) => names(text, owner))) {
+      throw new NodeRefusal('draft', 'reply_names_owner')
     }
     return turn
   }

@@ -84,8 +84,10 @@ export interface OwnerAsk {
   answer_text: string
 }
 
-/** Which asks list_asks lists: the account's open asks, or every ask and notice with one contact. */
-export type AsksOf = { open: true } | { contactFpr: string }
+/** export_card's answer, the field this agent reads: the account's card name, "" when it has none. */
+export interface CardFacts {
+  display_name?: string
+}
 
 /** ask_owner's and notify_owner's arguments: the ids code fills, and the surface the model wrote. */
 export type SurfaceArgs = Record<string, unknown> & { account_id: string; thread_id: string; for_message_id: string }
@@ -120,6 +122,7 @@ export const TOOLS_CALLED = [
   'ask_owner',
   'notify_owner',
   'list_asks',
+  'export_card',
 ] as const
 
 /**
@@ -147,8 +150,10 @@ export interface NodeClient {
   askOwner(args: SurfaceArgs): Promise<void>
   /** A notice for the owner, idempotent on for_message_id. */
   notifyOwner(args: SurfaceArgs): Promise<void>
-  /** The account's open asks, newest first, or one contact's asks and notices, oldest first. */
-  listAsks(accountId: string, of: AsksOf): Promise<OwnerAsk[]>
+  /** One thread's asks and notices, newest first, the node's newest 100. */
+  listAsks(accountId: string, threadId: string): Promise<OwnerAsk[]>
+  /** The owner's display name: the account's card name, "" when the card has none. */
+  ownerName(accountId: string): Promise<string>
   /** A tool's input schema as the node lists it; tool_not_offered for a tool it does not list. */
   toolSchema(name: string): Promise<JsonSchema>
   /** The node's tools/list, as this client took it. */
@@ -260,11 +265,16 @@ export function nodeClientOver(call: CallTool, catalog: Catalog): NodeClient {
     async notifyOwner(args) {
       await json('notify_owner', { ...args })
     },
-    async listAsks(accountId, of) {
-      const args = 'open' in of ? { account_id: accountId, status: 'open' } : { account_id: accountId, contact_fpr: of.contactFpr }
-      const answer = (await json('list_asks', args)) as { asks?: unknown } | null
+    async listAsks(accountId, threadId) {
+      const answer = (await json('list_asks', { account_id: accountId, thread_id: threadId })) as { asks?: unknown } | null
       if (!Array.isArray(answer?.asks)) throw new NodeRefusal('list_asks', 'unreadable_answer')
       return answer.asks as OwnerAsk[]
+    },
+    async ownerName(accountId) {
+      const card = (await json('export_card', { account_id: accountId })) as CardFacts | null
+      const name = card?.display_name ?? ''
+      if (typeof name !== 'string') throw new NodeRefusal('export_card', 'unreadable_answer')
+      return name.trim()
     },
     toolSchema: (name) => catalog.toolSchema(name),
     listTools: () => catalog.listTools(),

@@ -51,14 +51,18 @@ The model sees the thread's newest 20 messages with who wrote each, from the nod
 the contact, the owner (a message they wrote in the portal, or a ready reply they chose), or the
 agent itself. It is told that what the owner wrote is their decision, so a yes they already gave is
 not treated as one still to come. Their answers to the thread's earlier asks are shown to it as
-their decisions too. The node gives the agent no display name for its owner, so the model knows the
-owner by role, and by the name the persona uses.
+their decisions too. The owner is named in the thread by their display name: `display_name` from
+the node's `export_card`, the name on the account's card, read once per account at start and kept
+until the agent restarts. A card with no name, or a node whose `export_card` gives none, leaves the
+owner labelled "person" (`owner_name` in the log says whether a name was read; `owner_name_unread`,
+with the refusal, when the card could not be read, and the agent drafts on with "person").
 
 - **reply**: a message to the contact, sent with `send_to_contact`. The model is told that when the
   contact accepts what this side proposed, this side confirms it with a reply rather than none.
 - **ask**: a card for the owner, put with `ask_owner` for the message it is about, from the node's
-  component catalog: a one-line TLDR and the key terms first, one to three ready replies, and a box
-  to write their own last. Nothing goes to the contact. While any ask of a thread is open the agent
+  component catalog: a one-line TLDR and the key terms first, then one to three ready replies, each
+  a Button the owner taps once to send it, and last a box to write their own with the Button that
+  sends it. Nothing goes to the contact. While any ask of a thread is open the agent
   drafts nothing on that thread, and a newer message from the contact stays unread for the owner.
   A ready reply the owner taps, or words they write, are sent to the contact by the node as the
   owner's message; the agent then carries on from the thread. An ask that ends with its message still
@@ -66,8 +70,12 @@ owner by role, and by the name the persona uses.
   and only a reply, a notice or none is offered then. The model is told to ask only where the
   persona makes the decision the owner's for the topic, and to reply while it can answer within the
   owner's limits; and that each ready reply is the owner's own message, first person and complete,
-  never an instruction to the agent, the owner in the third person or a bare label. Code does not
-  check the ready replies' wording: they sit in the node's components, which the agent does not name.
+  never an instruction to the agent, the owner in the third person or a bare label. Code checks one
+  thing of their wording: an ask whose ready reply names the owner, by their first name or their whole
+  name as whole words, is refused (`draft:reply_names_owner`) and drafted again, since a reply that
+  names the person sending it speaks of them in the third person. The ready replies are found by
+  their shape in the node's components (a Button's event named `reply`, a ChoicePicker's options),
+  not by a component's place. With no display name there is nothing to check.
 - **notify**: a card for the owner with no buttons, put with `notify_owner`: a TLDR of what was
   agreed. The model is told that something is agreed only once both sides have said yes to the same
   terms, so a reply that still asks the contact to book or confirm goes without a notice, and the

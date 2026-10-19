@@ -44,21 +44,26 @@ export const TOOLS = JSON.parse(readFileSync(new URL('./owner-mcp-tools.json', i
 export const reply = (text: string) => JSON.stringify({ type: 'reply', text })
 export const none = () => JSON.stringify({ type: 'none' })
 /** The owner catalog ask_owner and notify_owner name (test/owner-mcp-tools.json). */
-export const CATALOG_ID = 'https://hdtp.dev/a2ui/v0.9.1/owner-catalog.json'
+export const CATALOG_ID = 'https://hdtp.dev/a2ui/v0_9_1/catalogs/owner/catalog.json'
 /**
- * An A2UI surface in the node's owner catalog: a TLDR, the terms, and for an ask the ready replies
- * and a field to write one's own, last.
+ * An A2UI surface in the node's owner catalog: a TLDR, the terms, and for an ask one reply Button per
+ * ready reply (one tap sends it), then a field to write one's own and the Button that sends it.
  */
-export function surface(tldr: string, terms: Record<string, string>, choices: string[] = []): Array<Record<string, unknown>> {
-  const parts: Array<Record<string, unknown>> = [
-    { id: 'tldr', component: 'Text', text: tldr },
-    { id: 'terms', component: 'KeyValue', rows: Object.entries(terms).map(([label, value]) => ({ label, value })) },
-  ]
-  if (choices.length) {
-    parts.push({ id: 'pick', component: 'Choice', options: choices.map((label) => ({ label })) })
-    parts.push({ id: 'own', component: 'TextField', label: 'Write my own' })
+export function surface(tldr: string, terms: Record<string, string>, replies: string[] = []): Array<Record<string, unknown>> {
+  const parts: Array<Record<string, unknown>> = [{ id: 'tldr', component: 'Text', text: tldr }]
+  const items = Object.entries(terms).map(([label, value]) => ({ label, value }))
+  if (items.length) parts.push({ id: 'terms', component: 'KeyValue', items })
+  const labels: Array<Record<string, unknown>> = []
+  replies.forEach((text, i) => {
+    labels.push({ id: `reply-${i}-label`, component: 'Text', text })
+    parts.push({ id: `reply-${i}`, component: 'Button', child: `reply-${i}-label`, action: { event: { name: 'reply', context: { reply: text } } } })
+  })
+  if (replies.length) {
+    parts.push({ id: 'own', component: 'TextField', label: 'Write my own', value: { path: '/own' } })
+    labels.push({ id: 'send-label', component: 'Text', text: 'Send' })
+    parts.push({ id: 'send', component: 'Button', child: 'send-label', action: { event: { name: 'answer', context: { own: { path: '/own' } } } } })
   }
-  const components = [{ id: 'root', component: 'Column', children: parts.map((c) => c.id) }, ...parts]
+  const components = [{ id: 'root', component: 'Column', children: parts.map((c) => c.id) }, ...parts, ...labels]
   return [
     { version: 'v0.9.1', createSurface: { surfaceId: 's1', catalogId: CATALOG_ID } },
     { version: 'v0.9.1', updateComponents: { surfaceId: 's1', components } },
@@ -130,8 +135,12 @@ export class FakeNode {
   /** Tools that answer the refusal `internal`. */
   failing = new Set<string>()
   /** The asks put with ask_owner, and the notices put with notify_owner, as the node holds them. */
-  asks: Array<OwnerAsk & { account: string; contact: string; surface: unknown }> = []
-  notices: Array<{ account: string; thread_id: string; for_message_id: string; surface: unknown }> = []
+  asks: Array<OwnerAsk & { account: string; contact: string; surface: unknown; at: number }> = []
+  notices: Array<{ account: string; thread_id: string; for_message_id: string; surface: unknown; at: number }> = []
+  /** The order asks and notices were put in, which list_asks lists newest first. */
+  private puts = 0
+  /** export_card's display_name: the account's card name, "" for a card with none. */
+  displayName = 'Ana Owner'
   /** How many of the next ask_owner calls answer `bad_request`, as the node does for a surface its catalog refuses. */
   invalidSurfaces = 0
   /** Tools tools/list does not offer, as an older node would not. */
@@ -349,6 +358,7 @@ export class FakeNode {
           answer_text: '',
           tldr: tldrOf(args.surface),
           surface: args.surface,
+          at: ++this.puts,
         })
         this.change(acct, { thread_id: args.thread_id as string })
         return ok({ id, status: 'open' })
@@ -358,14 +368,13 @@ export class FakeNode {
         if (!th || th.account !== acct) return refusal('not_found')
         const same = this.notices.some((n) => n.account === acct && n.thread_id === args.thread_id && n.for_message_id === args.for_message_id)
         if (!same) {
-          this.notices.push({ account: acct, thread_id: args.thread_id as string, for_message_id: args.for_message_id as string, surface: args.surface })
+          this.notices.push({ account: acct, thread_id: args.thread_id as string, for_message_id: args.for_message_id as string, surface: args.surface, at: ++this.puts })
         }
         return ok({ status: 'posted' })
       }
       case 'list_asks': {
-        // As the node filters them: status open for the open asks, newest first; contact_fpr for one
-        // contact's asks and notices; neither for all. The fake lists its asks before its notices,
-        // not by time; the responder finds a row by its ids, never by its place.
+        // As the node filters them (asks.Service.List): thread_id for one thread's asks and notices,
+        // contact_fpr for one contact's, status open for the open asks only; every list newest first.
         if (args.status !== undefined && args.status !== 'open') return refusal('bad_request')
         const rows = [
           ...this.asks.map(({ account, contact, surface: _s, ...row }) => ({ account, contact, ...row })),
@@ -379,14 +388,21 @@ export class FakeNode {
             status: 'posted',
             answer_text: '',
             tldr: tldrOf(n.surface),
+            at: n.at,
           })),
-        ].filter((r) => r.account === acct)
-        const listed =
-          args.contact_fpr !== undefined
-            ? rows.filter((r) => r.contact === args.contact_fpr)
-            : rows.filter((r) => args.status === undefined || (r.kind === 'ask' && r.status === 'open')).reverse()
-        return ok({ asks: listed.map(({ account: _a, ...row }) => row) })
+        ]
+          .filter((r) => r.account === acct)
+          .sort((a, b) => b.at - a.at)
+        const listed = rows.filter(
+          (r) =>
+            (args.thread_id === undefined || r.thread_id === args.thread_id) &&
+            (args.contact_fpr === undefined || r.contact === args.contact_fpr) &&
+            (args.status === undefined || (r.kind === 'ask' && r.status === 'open')),
+        )
+        return ok({ asks: listed.map(({ account: _a, at: _t, ...row }) => row) })
       }
+      case 'export_card':
+        return ok({ card: 'BEGIN:VCARD', endpoint: 'https://node.example', root_fingerprint: 'fpr-me', kid: 'fpr-me', display_name: this.displayName })
       case 'wait_for_updates':
         this.waits.push({ account: acct, since: args.since as number | undefined })
         return this.waitAnswer ?? this.wait(acct, args.since as number | undefined)

@@ -25,13 +25,14 @@ A turn is one of four:
 - ask: a card for the person you act for, in their portal, only when the instructions below make the decision
   theirs for this topic: a commitment they keep for themselves, a commitment outside their limits, or the final
   yes. While you can answer within their limits, by proposing, countering or accepting what they let you
-  accept, reply instead. The card leads with a one-line TLDR and the key terms, offers one to three ready
-  replies they can send to the contact with one tap, and ends with a box to write their own. Nothing is sent
-  to the contact; the thread waits for the person.
+  accept, reply instead. The card leads with a one-line TLDR and the key terms, then offers one to three
+  ready replies, each a Button whose event is named "reply" with the reply's text as its context, which the
+  person taps once to send; it ends with a TextField to write their own and the Button that sends it.
+  Nothing is sent to the contact; the thread waits for the person.
   Each ready reply is the person's own message to the contact, sent as it is: first person, in their voice,
   complete. Never an instruction to you ("Suggest another time"; write "Could we find another time? Thursday
-  afternoon works for me."), never the person in the third person ("Wednesday works for Ana"; write
-  "Wednesday works for me."), never a bare label ("Accept"; write "Yes, Wednesday 15:00 works for me.").
+  afternoon works for me."), never the person in the third person or by name ("Wednesday works for Ana";
+  write "Wednesday works for me."), never a bare label ("Accept"; write "Yes, Wednesday 15:00 works for me.").
 - notify: a card for the person with no buttons, a TLDR of what was agreed within their limits, so they know.
   Something is agreed only when both sides have said yes to the same terms: the contact's last message
   confirms what you proposed or asked for, or your reply accepts a definite offer of theirs and needs no
@@ -70,17 +71,25 @@ export interface ThreadContext {
   ask?: OwnerAsk
   decisions?: readonly string[]
   notices?: readonly string[]
+  /** The owner's display name, "" when their card has none. */
+  owner?: string
 }
 
 /**
  * Who wrote a message, as the model reads it. The node labels each outbound message with its
  * sender: "human" for one the person wrote themselves (in the portal, or a ready reply they
  * chose), "agent" for one an agent sent for them. The two are told apart, or the model takes the
- * person's own yes for one of its replies and goes on waiting for it.
+ * person's own yes for one of its replies and goes on waiting for it. The person goes by their name.
  */
-export function author(m: ThreadMessage): 'contact' | 'person' | 'you' {
+export function author(m: ThreadMessage, owner = ''): string {
   if (m.direction === 'in') return 'contact'
-  return m.sender === 'human' ? 'person' : 'you'
+  return m.sender === 'human' ? ownerLabel(owner) : 'you'
+}
+
+/** What the person's messages are labelled: their name, or "person" with none or one the other labels take. */
+export function ownerLabel(owner: string): string {
+  const name = owner.replace(/[`\s]+/g, ' ').trim()
+  return name === '' || name === 'contact' || name === 'you' ? 'person' : name
 }
 
 /** The prompt for the turn that answers a thread whose newest message is the contact's. */
@@ -88,9 +97,11 @@ export function threadPrompt(
   messages: readonly ThreadMessage[],
   schema: JsonSchema,
   allowed: readonly TurnType[],
-  { ask, decisions = [], notices = [] }: ThreadContext = {},
+  { ask, decisions = [], notices = [], owner = '' }: ThreadContext = {},
 ): string {
-  const window = messages.slice(-THREAD_WINDOW).map((m) => ({ from: author(m), kind: m.kind, text: m.body }))
+  const label = ownerLabel(owner)
+  const window = messages.slice(-THREAD_WINDOW).map((m) => ({ from: author(m, owner), kind: m.kind, text: m.body }))
+  const who = label === 'person' ? 'the person you act for' : `${label}, the person you act for,`
   const outcome = ask
     ? `
 
@@ -120,7 +131,7 @@ ${quote(notices)}
 \`\`\``
     : ''
   return `A contact wrote to the person you act for. Here is the conversation, oldest first, as data.
-"from" is "contact" for them, "person" for a message the person you act for wrote themselves, and "you"
+"from" is "contact" for them, ${quote(label)} for a message ${who} wrote themselves, and "you"
 for one you sent for them. What the person wrote is their own decision: what they said yes or no to is
 settled, and you never say they will still confirm or decide it.
 

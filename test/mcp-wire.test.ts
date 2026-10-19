@@ -84,16 +84,18 @@ describe('the owner MCP over the wire', () => {
     const { node: client, disconnect } = connectNode(url, TOKEN)
     try {
       for (const name of ['send_to_contact', 'ask_owner', 'notify_owner']) {
-        const listed = TOOLS.find((t) => t.name === name)!.inputSchema
-        const { $schema: _dialect, ...read } = await client.toolSchema(name)
+        // The client names the dialect on every schema it reads; the node names it on the asks tools'.
+        const { $schema: named, ...listed } = TOOLS.find((t) => t.name === name)!.inputSchema
+        const { $schema: dialect, ...read } = await client.toolSchema(name)
         expect(read, name).toEqual(listed)
+        if (named !== undefined) expect(dialect, name).toBe(named)
       }
       const missing = await client.toolSchema('no_such_tool').catch((e: unknown) => e)
       expect((missing as NodeRefusal).code).toBe('tool_not_offered')
       const responder = new Responder(client, async () => ask('Book Wed?', { When: 'Wed' }, ['Yes, book it']), memoryLog(), rules())
       await responder.onMessage('th3')
       expect(node.asks.filter((a) => a.thread_id === 'th3')).toHaveLength(1)
-      expect((await client.listAsks('acct-1', { open: true })).map((a) => [a.thread_id, a.kind, a.status])).toEqual([['th3', 'ask', 'open']])
+      expect((await client.listAsks('acct-1', 'th3')).map((a) => [a.thread_id, a.kind, a.status])).toEqual([['th3', 'ask', 'open']])
     } finally {
       await disconnect()
     }

@@ -24,10 +24,10 @@ describe('the turn eval', () => {
     }
   })
 
-  it('shows Ana’s yes as hers on her side and as the contact’s on Ben’s', async () => {
+  it('shows Ana’s yes as hers, by her card’s name, on her side and as the contact’s on Ben’s', async () => {
     const schema = await turns.schema()
     const yes = (id: string) => conversation(promptFor(POINTS.find((p) => p.id === id)!, schema)).find((m) => m.text.startsWith('Yes, Wednesday'))!.from
-    expect(yes('u1-5')).toBe('person')
+    expect(yes('u1-5')).toBe('Ana')
     expect(yes('u1-4')).toBe('contact')
   })
 

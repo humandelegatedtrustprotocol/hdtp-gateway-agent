@@ -150,6 +150,8 @@ export class Responder {
   private readonly waiting = new Bounded<true>(REMEMBERED)
   /** Notices a turn chose that notify_owner has not taken yet, by thread, with the reply key they follow. */
   private readonly owed = new Bounded<{ key: string; args: SurfaceArgs }>(REMEMBERED)
+  /** The owner's display name by account, once read (nameOf). */
+  private readonly names = new Map<string, string>()
   /** Work in flight by key, and whether another call asked for it while it ran. */
   private readonly running = new Map<string, { again: boolean }>()
 
@@ -202,12 +204,13 @@ export class Responder {
   }
 
   /**
-   * One pass over one account: its open requests first, since a caller is waiting on each, then
+   * One pass over one account: the owner's name if it is not read yet, then its open requests, since a caller is waiting on each, then
    * its unread threads, those with a newer message than the last pass saw (read by the owner or
    * not), the threads a failure left to revisit, those with an open ask, and those owing a notice. A section that fails is logged
    * by code and the pass goes on, so a failing list_pending does not keep threads unanswered.
    */
   async reconcileAccount(accountId: string): Promise<void> {
+    await this.nameOf(accountId)
     await this.section('list_pending', async () => {
       for (const row of await this.node.listPending(accountId)) {
         await this.answerRequest(accountId, row)
@@ -287,9 +290,10 @@ export class Responder {
         return
       }
       const schema = await this.turns.schema()
-      // One open ask per thread, so the account's open asks hold it: newest first, where a
-      // contact's long list (oldest first, cut at the node's limit) would lose it.
-      if ((await this.node.listAsks(accountId, { open: true })).some((a) => a.thread_id === row.thread_id)) {
+      // The thread's asks and notices, newest first (the node's newest 100). An open ask holds the
+      // thread; the rest go to the model below.
+      const asks = await this.node.listAsks(accountId, row.thread_id)
+      if (asks.some((a) => a.kind === 'ask' && a.status === 'open')) {
         this.revisit.delete(where)
         this.waiting.set(where, true)
         this.log.info('ask_open', ids)
@@ -318,20 +322,18 @@ export class Responder {
         this.log.info('agent_turn_cap', { thread_id: row.thread_id, turns })
         return
       }
-      // The ask this message raised, now answered with no message to the contact, or expired. A
-      // message id names one message of one contact, so the contact's list holds it once. The
+      // The ask this message raised, now answered with no message to the contact, or expired. The
       // person's answers to the thread's earlier asks go to the model as their decisions, and the
-      // thread's notices too, so an agreement already notified is not notified again.
-      const asks = await this.node.listAsks(accountId, { contactFpr: row.contact_fpr })
+      // thread's notices too, so an agreement already notified is not notified again; both oldest
+      // first.
       const ask = asks.find((a) => a.kind === 'ask' && a.for_message_id === newest.message_id)
-      const onThread = asks.filter((a) => a.thread_id === row.thread_id)
-      const decisions = onThread
-        .filter((a) => a !== ask && a.status === 'answered')
-        .map((a) => a.answer_text)
-      const notices = onThread.filter((a) => a.kind === 'notice').map((a) => a.tldr)
+      const oldest = [...asks].reverse()
+      const decisions = oldest.filter((a) => a !== ask && a.status === 'answered').map((a) => a.answer_text)
+      const notices = oldest.filter((a) => a.kind === 'notice').map((a) => a.tldr)
       const allowed = ask ? AFTER_ASK_TURNS : FIRST_TURNS
+      const owner = await this.nameOf(accountId)
       await this.attempt(key, where, ids, async () => {
-        const turn = await this.write(contact, threadPrompt(messages, schema, allowed, { ask, decisions, notices }), allowed)
+        const turn = await this.write(contact, threadPrompt(messages, schema, allowed, { ask, decisions, notices, owner }), allowed, owner)
         const surface = { account_id: accountId, thread_id: row.thread_id, for_message_id: newest.message_id }
         const send = (text: string) =>
           this.node.sendToContact({ account_id: accountId, contact_fpr: row.contact_fpr, thread_id: row.thread_id, msg_id: key, text })
@@ -407,7 +409,7 @@ export class Responder {
    * work began, and is checked again here, where it is spent, for drafts of one contact that ran
    * side by side.
    */
-  private async write(contact: string, prompt: string, allowed: readonly TurnType[]): Promise<Turn> {
+  private async write(contact: string, prompt: string, allowed: readonly TurnType[], owner = ''): Promise<Turn> {
     if (!this.budget.take(contact)) throw new NodeRefusal('draft', 'contact_budget')
     let text: string
     try {
@@ -418,7 +420,26 @@ export class Responder {
       throw new NodeRefusal('draft', 'model_failed')
     }
     if (!text) throw new NodeRefusal('draft', 'empty')
-    return this.turns.read(text, allowed)
+    return this.turns.read(text, allowed, owner)
+  }
+
+  /**
+   * The owner's display name, read from their card (export_card) once per account: at the account's
+   * first pass, or its first webhook. "" when the card names no one; a failed read is logged, the
+   * turn goes on without the name, and the next turn reads it again.
+   */
+  private async nameOf(accountId: string): Promise<string> {
+    const known = this.names.get(accountId)
+    if (known !== undefined) return known
+    try {
+      const name = await this.node.ownerName(accountId)
+      this.names.set(accountId, name)
+      this.log.info('owner_name', { account_id: accountId, named: name !== '' })
+      return name
+    } catch (e) {
+      this.log.warn('owner_name_unread', { account_id: accountId, reason: refusalCode(e) })
+      return ''
+    }
   }
 
   /**
