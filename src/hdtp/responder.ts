@@ -19,6 +19,11 @@
 // agent has no tools and can only write a message, which messages_only already allows, so a
 // higher flag would let it do nothing more.
 //
+// The agent answers only what arrived after it first started (first-start.ts): a thread whose
+// newest message (get_inbox's last_at, which the node sets to its newest message's time) is older
+// is the owner's backlog, and is left unread for them. The cutoff is decided before read_thread.
+// It is not applied to requests: an open request is a caller waiting now, and it expires.
+//
 // read_thread marks the thread read before the model has drafted anything. A thread whose draft
 // or send failed is therefore kept here and revisited by the next reconcile pass, up to
 // MAX_ATTEMPTS times; a process that stops in between loses it, because the node no longer
@@ -74,6 +79,8 @@ export interface Rules {
   turnCap: number
   /** Drafts per contact per hour, whatever the labels say (HDTP_AGENT_REPLIES_PER_HOUR). */
   repliesPerHour: number
+  /** Unix seconds: the agent's first start. A thread whose newest message is older is left to the owner. */
+  firstStart: number
   /** Unix seconds now. */
   now: () => number
 }
@@ -95,6 +102,7 @@ export class Responder {
   private readonly draft: Draft
   private readonly log: Log
   private readonly turnCap: number
+  private readonly firstStart: number
   private readonly budget: Budget
 
   constructor(node: NodeClient, draft: Draft, log: Log, rules: Rules) {
@@ -102,6 +110,7 @@ export class Responder {
     this.draft = draft
     this.log = log
     this.turnCap = rules.turnCap
+    this.firstStart = rules.firstStart
     this.budget = new Budget(rules.repliesPerHour, rules.now)
   }
 
@@ -185,6 +194,11 @@ export class Responder {
     if (row.contact_status !== 'active') {
       this.revisit.delete(where)
       this.log.info('contact_not_active', { thread_id: row.thread_id, status: row.contact_status })
+      return
+    }
+    if (row.last_at < this.firstStart) {
+      this.revisit.delete(where)
+      this.log.info('before_first_start', { thread_id: row.thread_id })
       return
     }
     const contact = contactKey(accountId, row.contact_fpr)

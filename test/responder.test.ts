@@ -238,6 +238,28 @@ describe('a thread between two agents', () => {
   })
 })
 
+describe('the start cutoff', () => {
+  it('leaves a thread whose newest message is older than the first start unread, and answers one after it', async () => {
+    const { node, prompts, responder, log } = setup(undefined, { firstStart: 1_760_000_002 })
+    node.thread('th-old')
+    node.thread('th-new', 'fpr-new')
+    node.inbound('th-old', 'from before the agent started') // 1_760_000_001
+    node.inbound('th-new', 'sent at the first start') // 1_760_000_002
+    await responder.reconcile()
+    await responder.onMessage('th-old')
+    expect(node.sent.map((s) => s.thread_id)).toEqual(['th-new'])
+    expect(prompts).toHaveLength(1)
+    expect(log.lines.filter((l) => l.code === 'before_first_start').map((l) => l.fields)).toEqual([{ thread_id: 'th-old' }, { thread_id: 'th-old' }])
+    // Decided before read_thread: the backlog is still unread for the owner.
+    const inbox = await nodeClientOver(node.call).getInbox('acct-1')
+    expect(inbox.find((t) => t.thread_id === 'th-old')!.unread).toBe(1)
+    // A new message in that thread is after the first start, and is answered.
+    node.inbound('th-old', 'and now')
+    await responder.onMessage('th-old')
+    expect(node.sent.map((s) => s.thread_id)).toEqual(['th-new', 'th-old'])
+  })
+})
+
 describe('the budget of drafts per contact', () => {
   it('stops a peer that labels every message human at the budget, and leaves the thread unread', async () => {
     const { node, prompts, responder, log } = setup(undefined, { repliesPerHour: 3 })

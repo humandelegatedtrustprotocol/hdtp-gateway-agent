@@ -17,11 +17,15 @@ export function envelope(id: string, type: string, data: Record<string, unknown>
   return JSON.stringify({ id, type, created_at: 1_760_000_000_000, identity: 'alex', data })
 }
 
-/** The responder's rules at their defaults, on the host's clock, with any of them replaced. */
+/**
+ * The responder's rules at their defaults, on the host's clock, with any of them replaced. The first
+ * start is 0, before every message a FakeNode holds, unless a test sets it.
+ */
 export function rules(over: Partial<Rules> = {}): Rules {
   return {
     turnCap: DEFAULT_AGENT_TURN_CAP,
     repliesPerHour: DEFAULT_REPLIES_PER_HOUR,
+    firstStart: 0,
     now: () => Math.floor(Date.now() / 1000),
     ...over,
   }

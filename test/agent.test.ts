@@ -64,6 +64,11 @@ describe('the configuration', () => {
     expect(readConfig({ HDTP_AGENT_REPLIES_PER_HOUR: '0' }).repliesPerHour).toBe(10)
   })
 
+  it('keeps its data in ./data by default, or where HDTP_AGENT_DATA_DIR says', () => {
+    expect(readConfig({}).dataDir).toBe('data')
+    expect(readConfig({ HDTP_AGENT_DATA_DIR: '/var/lib/agent' }).dataDir).toBe('/var/lib/agent')
+  })
+
   it('lists every variable it reads in .env.example', () => {
     const example = readFileSync('.env.example', 'utf8')
     const source = readFileSync('src/hdtp/config.ts', 'utf8')

@@ -12,6 +12,7 @@
 
 import { spawn } from 'node:child_process'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import type { Server } from 'node:http'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
@@ -26,6 +27,7 @@ function hdtpEnv(url: string): Record<string, string> {
     HDTP_WEBHOOK_SECRET: 'whsec_cli-test',
     HDTP_RECONCILE_SECONDS: '3600',
     HDTP_PERSONA_FILE: resolve('persona.md'),
+    HDTP_AGENT_DATA_DIR: mkdtempSync(join(tmpdir(), 'hdtp-agent-data-')),
     MASTRA_TELEMETRY_DISABLED: '1',
   }
 }

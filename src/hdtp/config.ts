@@ -10,6 +10,8 @@ export const DEFAULT_PERSONA_FILE = 'persona.md'
 export const DEFAULT_AGENT_TURN_CAP = 3
 /** How many drafts one contact may have in an hour, whatever the sender labels say. */
 export const DEFAULT_REPLIES_PER_HOUR = 10
+/** Where the agent keeps what it must remember across restarts: its first-start time. */
+export const DEFAULT_DATA_DIR = 'data'
 
 export interface Config {
   model: string
@@ -20,6 +22,7 @@ export interface Config {
   personaFile: string
   agentTurnCap: number
   repliesPerHour: number
+  dataDir: string
 }
 
 const set = (v: string | undefined) => (v === undefined || v.trim() === '' ? undefined : v.trim())
@@ -40,5 +43,6 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
     personaFile: set(env.HDTP_PERSONA_FILE) ?? DEFAULT_PERSONA_FILE,
     agentTurnCap: count(env.HDTP_AGENT_TURN_CAP, DEFAULT_AGENT_TURN_CAP),
     repliesPerHour: count(env.HDTP_AGENT_REPLIES_PER_HOUR, DEFAULT_REPLIES_PER_HOUR),
+    dataDir: set(env.HDTP_AGENT_DATA_DIR) ?? DEFAULT_DATA_DIR,
   }
 }
