@@ -344,7 +344,7 @@ export class FakeNode {
         if (this.asks.some((a) => a.account === acct && a.thread_id === args.thread_id && a.status === 'open')) return refusal('conflict')
         if (this.invalidSurfaces > 0) {
           this.invalidSurfaces--
-          return refusal('bad_request')
+          return refusal('bad_request', { reason: 'invalid_surface:component_shape' })
         }
         const id = `ask-${this.asks.length + 1}`
         this.asks.push({

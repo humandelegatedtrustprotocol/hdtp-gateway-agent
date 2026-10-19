@@ -473,7 +473,9 @@ export class Responder {
       if (where) this.revisit.delete(where)
     } catch (e) {
       const last = n >= MAX_ATTEMPTS
-      this.log.warn(last ? 'gave_up' : 'attempt_failed', { ...ids, reason: refusalCode(e), attempt: n })
+      // The node's rule, when it names one (ask_owner's invalid_surface:<rule>), beside the refusal.
+      const rule: Record<string, string> = e instanceof NodeRefusal && e.reason !== '' ? { node_reason: e.reason } : {}
+      this.log.warn(last ? 'gave_up' : 'attempt_failed', { ...ids, reason: refusalCode(e), ...rule, attempt: n })
       if (where) {
         if (last) this.revisit.delete(where)
         else this.revisit.set(where, true)

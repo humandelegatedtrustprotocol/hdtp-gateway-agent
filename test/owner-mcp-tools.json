@@ -520,7 +520,7 @@
         },
         "TextField": {
           "additionalProperties": false,
-          "description": "Write my own: what the owner types is written at the bound path; a Button that sends that path sends it to the contact as their own message. The last input under root.",
+          "description": "Write my own: what the owner types is written at the bound path. Every ask has one, root's next-to-last child, and root's last child is the Button that sends it: its context reads this path, and what the owner wrote is sent to the contact as their own message.",
           "properties": {
             "component": {
               "const": "TextField",
@@ -568,7 +568,7 @@
           "type": "string"
         },
         "surface": {
-          "description": "An A2UI v0.9.1 surface: a createSurface message naming catalogId https://hdtp.dev/a2ui/v0_9_1/catalogs/owner/catalog.json, then an updateComponents message for the same surfaceId. Its components list the root first, a Column of id \"root\", then the TLDR, the Text that is root's first child. Optionally a third, updateDataModel for the same surfaceId: the values the inputs start from. The owner answers by pressing a Button. Each ready reply is a Button of event \"reply\" with context {reply: its text}, sent in one tap; every input binds its value to a {path}, and the Button that sends it names those paths in its context.",
+          "description": "An A2UI v0.9.1 surface: a createSurface message naming catalogId https://hdtp.dev/a2ui/v0_9_1/catalogs/owner/catalog.json, then an updateComponents message for the same surfaceId. Its components list the root first, a Column of id \"root\", then the TLDR, the Text that is root's first child. Optionally a third, updateDataModel for the same surfaceId: the values the inputs start from. The owner answers by pressing a Button. Each ready reply is a Button of event \"reply\" with context {reply: its text}, sent in one tap; every input binds its value to a {path}, and the Button that sends it names those paths in its context. Every ask ends with the owner's own message: root's last two children are a TextField, then the Button that sends it, whose context reads the TextField's path.",
           "maxItems": 3,
           "minItems": 2,
           "prefixItems": [
@@ -646,21 +646,6 @@
                         {
                           "contains": {
                             "properties": {
-                              "component": {
-                                "const": "TextField"
-                              }
-                            },
-                            "required": [
-                              "component"
-                            ],
-                            "type": "object"
-                          },
-                          "maxContains": 1,
-                          "minContains": 0
-                        },
-                        {
-                          "contains": {
-                            "properties": {
                               "action": {
                                 "properties": {
                                   "event": {
@@ -697,11 +682,48 @@
                           "contains": {
                             "properties": {
                               "component": {
-                                "const": "Button"
+                                "const": "TextField"
                               }
                             },
                             "required": [
                               "component"
+                            ],
+                            "type": "object"
+                          },
+                          "maxContains": 1,
+                          "minContains": 1
+                        },
+                        {
+                          "contains": {
+                            "properties": {
+                              "action": {
+                                "properties": {
+                                  "event": {
+                                    "properties": {
+                                      "name": {
+                                        "not": {
+                                          "const": "reply"
+                                        }
+                                      }
+                                    },
+                                    "required": [
+                                      "name"
+                                    ],
+                                    "type": "object"
+                                  }
+                                },
+                                "required": [
+                                  "event"
+                                ],
+                                "type": "object"
+                              },
+                              "component": {
+                                "const": "Button"
+                              }
+                            },
+                            "required": [
+                              "component",
+                              "action"
                             ],
                             "type": "object"
                           }

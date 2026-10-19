@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs'
 import type { Server } from 'node:http'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { NodeRefusal, TOOLS_CALLED, connectNode } from '../src/hdtp/node.ts'
+import { NodeRefusal, TOOLS_CALLED, connectNode, decodeAnswer } from '../src/hdtp/node.ts'
 import { missingTools } from '../src/hdtp/runtime.ts'
 import { Responder } from '../src/hdtp/responder.ts'
 import { SIGNATURE_HEADER } from '../src/hdtp/signature.ts'
@@ -24,6 +24,41 @@ describe('the owner MCP over the wire', () => {
     // A wait the client let go of is still held by the fake until its clock runs out.
     server.closeAllConnections()
     return new Promise<void>((r) => server.close(() => r()))
+  })
+
+  it('reads the rule a refusal names, as a code, over the wire', async () => {
+    // A node of its own, so the thread it makes is in no other test's inbox.
+    const own = new FakeNode()
+    own.thread('th-rule')
+    own.inbound('th-rule', 'Wednesday?')
+    own.invalidSurfaces = 1
+    const served = await serve(own)
+    const { node: client, disconnect } = connectNode(served.url, TOKEN)
+    try {
+      const surface = (JSON.parse(ask('TLDR', { When: 'Wed' }, ['Wednesday works for me.'])) as { ask: { surface: unknown } }).ask.surface
+      const refused = await client.askOwner({ account_id: 'acct-1', thread_id: 'th-rule', for_message_id: 'm-x', surface }).catch((e: unknown) => e)
+      expect(refused).toMatchObject({ tool: 'ask_owner', code: 'bad_request', reason: 'invalid_surface:component_shape' })
+    } finally {
+      await disconnect()
+      served.server.closeAllConnections()
+      await new Promise<void>((r) => served.server.close(() => r()))
+    }
+  })
+
+  it('keeps a refusal’s reason only when it is a code, and never its text', () => {
+    const answer = (v: Record<string, unknown>) => ({ isError: true, content: [{ type: 'text', text: JSON.stringify({ code: 'bad_request', ...v }) }] })
+    const reason = (v: Record<string, unknown>) => {
+      try {
+        decodeAnswer('ask_owner', answer(v))
+      } catch (e) {
+        return (e as NodeRefusal).reason
+      }
+    }
+    expect(reason({ reason: 'invalid_surface:prop_size' })).toBe('invalid_surface:prop_size')
+    expect(reason({})).toBe('')
+    for (const bad of ['Surface too large: 9000 bytes', 'invalid_surface:a:b', `invalid_surface:${'x'.repeat(60)}`, 'Invalid_surface', 7, null]) {
+      expect(reason({ reason: bad }), String(bad)).toBe('')
+    }
   })
 
   it('calls the tools by name with the bearer token, and reads refusals by code', async () => {

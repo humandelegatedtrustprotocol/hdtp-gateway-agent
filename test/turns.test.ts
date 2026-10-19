@@ -185,7 +185,7 @@ describe('ask', () => {
     node.inbound('th1', 'Can we lock in Wednesday 15:00?', 'agent')
     await responder.onMessage('th1')
     expect(node.asks).toEqual([])
-    expect(log.lines.find((l) => l.code === 'attempt_failed')?.fields).toMatchObject({ reason: 'ask_owner:bad_request', attempt: 1 })
+    expect(log.lines.find((l) => l.code === 'attempt_failed')?.fields).toEqual({ thread_id: 'th1', reason: 'ask_owner:bad_request', node_reason: 'invalid_surface:component_shape', attempt: 1 })
     await responder.reconcile()
     expect(prompts).toHaveLength(2)
     expect(node.asks).toHaveLength(1)
@@ -315,6 +315,8 @@ describe('notify', () => {
     await responder.onMessage('th1')
     expect(node.sent).toHaveLength(1)
     expect(node.notices).toEqual([])
+    // A refusal that names no rule logs none.
+    expect(log.lines.find((l) => l.code === 'attempt_failed')?.fields).not.toHaveProperty('node_reason')
     expect(log.lines.find((l) => l.code === 'attempt_failed')?.fields).toMatchObject({ reason: 'notify_owner:internal' })
     node.failing.delete('notify_owner')
     await responder.reconcile()

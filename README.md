@@ -45,7 +45,11 @@ anything else by code (`draft:invalid_turn`); a refused turn is drafted again on
 out, so a null on an optional field passes and one on a required field is still refused. Each
 draft is one model call capped at 4096 output tokens, reasoning included; a call that stops at the
 cap is refused (`draft:truncated`) and counts as a failed attempt, so a model that pads a turn
-cannot hold a thread for minutes. The cap is fixed in code, not a setting.
+cannot hold a thread for minutes. The cap is fixed in code, not a setting. A turn the node refuses
+is a failed attempt too; when the refusal names the node's rule (`ask_owner` answers
+`invalid_surface:<rule>` for a surface its catalog refuses), the `attempt_failed` or `gave_up` line
+carries it as `node_reason` beside `reason`, and only when it is a code: no text of the node's is
+logged.
 
 The model sees the thread's newest 20 messages with who wrote each, from the node's sender label:
 the contact, the owner (a message they wrote in the portal, or a ready reply they chose), or the

@@ -166,13 +166,23 @@ export class NodeRefusal extends Error {
   readonly code: string
   /** send_to_contact only: the message was recorded, and the node goes on delivering it. */
   readonly recorded: boolean
-  constructor(tool: string, code: string, recorded = false) {
+  /** Which of the node's rules refused it, as the node names it ("invalid_surface:<rule>"); "" for none. */
+  readonly reason: string
+  constructor(tool: string, code: string, recorded = false, reason = '') {
     super(`${tool}: ${code}`)
     this.tool = tool
     this.code = code
     this.recorded = recorded
+    this.reason = reason
   }
 }
+
+/**
+ * A refusal's reason as the node sends it beside the code: a code of its own, lower-case words
+ * with at most one colon, at most 64 bytes. Anything else is not kept, so no text reaches the log.
+ */
+export const REASON = /^[a-z][a-z0-9_]*(:[a-z][a-z0-9_]*)?$/
+const reasonOf = (v: unknown): string => (typeof v === 'string' && v.length <= 64 && REASON.test(v) ? v : '')
 
 /** What to log for a failure: the refusal's tool and code, never an error's text. */
 export function refusalCode(e: unknown): string {
@@ -197,9 +207,9 @@ export function decodeAnswer(tool: string, answer: ToolAnswer): unknown {
     throw new NodeRefusal(tool, 'unreadable_answer')
   }
   if (answer.isError) {
-    const v = value as { code?: unknown; ThreadID?: unknown } | null
+    const v = value as { code?: unknown; reason?: unknown; ThreadID?: unknown } | null
     const recorded = typeof v?.ThreadID === 'string' && v.ThreadID !== ''
-    throw new NodeRefusal(tool, typeof v?.code === 'string' ? v.code : 'tool_error', recorded)
+    throw new NodeRefusal(tool, typeof v?.code === 'string' ? v.code : 'tool_error', recorded, reasonOf(v?.reason))
   }
   return value
 }
