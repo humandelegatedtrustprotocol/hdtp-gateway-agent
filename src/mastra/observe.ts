@@ -8,14 +8,23 @@
 import type { Mastra } from '@mastra/core'
 import { SpanType, type AnySpan } from '@mastra/core/observability'
 import { executeWithContext, getCurrentSpan } from '@mastra/core/observability/context-storage'
-import { observedLog, type Fields, type Log, type Trace } from '../hdtp/log.ts'
+import { observedLog, type Fail, type Fields, type Log, type Trace } from '../hdtp/log.ts'
 import { refusalCode } from '../hdtp/node.ts'
 
-export function observe(mastra: Mastra): { log: Log; trace: Trace } {
+export function observe(mastra: Mastra): { log: Log; trace: Trace; fail: Fail } {
   const instance = mastra.observability.getDefaultInstance()
   if (!instance?.getLoggerContext) throw new Error('observability_unconfigured')
   const logger = instance.getLoggerContext.bind(instance)
   const start = (name: string) => instance.startSpan({ type: SpanType.GENERIC, name })
+  // A span is marked failed by a code alone: an error's text and its stack may carry what a contact
+  // wrote or where the code runs, and the store is shown to whoever opens Studio.
+  const coded = (code: string) => {
+    const error = new Error(code)
+    error.stack = undefined
+    return error
+  }
+  // A loop started inside a span keeps that span as its context after the span has ended.
+  const open = (span: AnySpan | undefined) => (span && !span.endTime ? span : undefined)
 
   const trace: Trace = async (name, fn) => {
     const span = start(name)
@@ -23,19 +32,16 @@ export function observe(mastra: Mastra): { log: Log; trace: Trace } {
     try {
       result = await executeWithContext({ span, fn })
     } catch (e) {
-      // The span is marked failed by the error's code alone: its text and its stack may carry what a
-      // contact wrote or where the code runs, and the store is shown to whoever opens Studio.
-      const coded = new Error(refusalCode(e))
-      coded.stack = undefined
-      span.error({ error: coded, endSpan: true })
+      span.error({ error: coded(refusalCode(e)), endSpan: true })
       throw e
     }
     span.end()
     return result
   }
 
-  // A loop started inside a span keeps that span as its context after the span has ended.
-  const open = (span: AnySpan | undefined) => (span && !span.endTime ? span : undefined)
+  // The span stays open: the work in it goes on, and the span's end keeps it marked.
+  const fail: Fail = (code) => open(getCurrentSpan())?.error({ error: coded(code), endSpan: false })
+
   const write = (level: 'info' | 'warn', code: string, fields?: Fields) => {
     const current = open(getCurrentSpan())
     if (current) return logger(current)[level](code, fields)
@@ -46,6 +52,7 @@ export function observe(mastra: Mastra): { log: Log; trace: Trace } {
 
   return {
     trace,
+    fail,
     log: observedLog({ info: (code, fields) => write('info', code, fields), warn: (code, fields) => write('warn', code, fields) }),
   }
 }

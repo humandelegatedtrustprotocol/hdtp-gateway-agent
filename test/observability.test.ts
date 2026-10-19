@@ -13,10 +13,11 @@ import { InMemoryStore, type MastraCompositeStore } from '@mastra/core/storage'
 import { createMockModel } from '@mastra/core/test-utils/llm-mock'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { FIRST_START_FILE } from '../src/hdtp/first-start.ts'
+import { MAX_ATTEMPTS } from '../src/hdtp/responder.ts'
 import { receive } from '../src/hdtp/runtime.ts'
 import { SIGNATURE_HEADER } from '../src/hdtp/signature.ts'
 import { KEEP_MS, sweep } from '../src/mastra/retention.ts'
-import { FakeNode, envelope, reply, sign } from './fakes.ts'
+import { FakeNode, ask, envelope, reply, sign } from './fakes.ts'
 import { TOKEN, serve } from './wire.ts'
 
 const WEBHOOK_SECRET = 'whsec_observability-test'
@@ -195,6 +196,60 @@ describe("the entry file's Mastra instance", () => {
     expect(failed.map((t) => [t.status, t.error])).toEqual([['error', { message: 'unexpected', name: 'Error' }]])
     const stored = JSON.stringify(await s.getTrace({ traceId: failed[0]!.traceId }))
     expect(stored).not.toContain('what a contact wrote')
+  })
+
+  it('marks the span a turn is given up in as an error, by its code, with the lines of its ending', async () => {
+    // Found on the U1 dry run (2026-10-20): a webhook hit whose last attempt was refused showed OK.
+    // Each hit is one attempt: the node refuses the ask each time, and the third is the last.
+    const { delegate } = await import('../src/mastra/agents/delegate.ts')
+    const commitment = ask('Ben asks to meet Wed 15:00', { When: 'Wed 15:00' }, ['Yes, Wednesday 15:00 works for me.'])
+    delegate.__updateModel({ model: createMockModel({ mockText: commitment, version: 'v2' }) })
+    node.invalidSurfaces = MAX_ATTEMPTS
+    node.invalidReason = 'invalid_surface:placed_twice'
+    node.trust.set('fpr-gave-up', 'may_instruct')
+    node.thread('th-gave-up', 'fpr-gave-up')
+    // Recorded without a change, as above, so only the hits below reach it.
+    node.threads.get('th-gave-up')!.messages.push({
+      direction: 'in',
+      sender: 'agent',
+      kind: 'text',
+      body: 'Can we lock in Wednesday 15:00?',
+      trust: 'messages_only',
+      message_id: 'msg-gave-up',
+      created_at: 1_760_000_200,
+    })
+    try {
+      const s = await store()
+      const lines = async (code: string) => {
+        await mastra.observability.flush()
+        return (await allLogs(s)).filter((l) => l.message === code && (l.data as Record<string, unknown> | null)?.thread_id === 'th-gave-up')
+      }
+      for (let i = 1; i <= MAX_ATTEMPTS; i++) {
+        expect((await post(envelope(`evt_gave_up_${i}`, 'message.received', { thread_id: 'th-gave-up' }))).status).toBe(202)
+        await until(async () => (await lines('attempt_failed')).length + (await lines('gave_up')).length >= i)
+      }
+      const [given] = await lines('gave_up')
+      expect(given?.data).toMatchObject({ reason: 'ask_owner:bad_request', node_reason: 'invalid_surface:placed_twice', attempt: MAX_ATTEMPTS })
+      let trace: Awaited<ReturnType<typeof s.getTrace>> = null
+      await until(async () => {
+        await mastra.observability.flush()
+        trace = await s.getTrace({ traceId: given!.traceId! })
+        return !!trace?.spans.find((sp) => !sp.parentSpanId)?.endedAt
+      })
+      const root = trace!.spans.find((sp) => !sp.parentSpanId)!
+      // The trace's status as Studio's Traces page lists it, computed from its root span.
+      const listed = (await s.listTraces({})).spans.find((t) => t.traceId === root.traceId)
+      expect([listed?.name, listed?.status, listed?.error]).toEqual(['webhook', 'error', { message: 'ask_owner:bad_request', name: 'Error' }])
+      const ended = (await allLogs(s)).filter((l) => l.traceId === root.traceId).map((l) => l.message)
+      expect(ended.sort()).toEqual(['gave_up', 'gave_up_notified', 'webhook_accepted'])
+      // The attempts before it were retried, and their spans are not marked.
+      const [first] = await lines('attempt_failed')
+      expect((await s.getTrace({ traceId: first!.traceId! }))?.spans.find((sp) => !sp.parentSpanId)?.error).toBeFalsy()
+    } finally {
+      delegate.__updateModel({ model: createMockModel({ mockText: reply('Wednesday at three works.'), version: 'v2' }) })
+      node.invalidSurfaces = 0
+      node.invalidReason = new FakeNode().invalidReason
+    }
   })
 
   it('runs each reconcile pass and each wait loop pass in a span of its own', async () => {

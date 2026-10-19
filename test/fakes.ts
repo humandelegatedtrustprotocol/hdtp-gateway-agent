@@ -143,6 +143,8 @@ export class FakeNode {
   displayName = 'Ana Owner'
   /** How many of the next ask_owner calls answer `bad_request`, as the node does for a surface its catalog refuses. */
   invalidSurfaces = 0
+  /** The rule those refusals name, as the node's reason invalid_surface:<rule>. */
+  invalidReason = 'invalid_surface:component_shape'
   /** Tools tools/list does not offer, as an older node would not. */
   unlisted = new Set<string>()
   private clock = 1_760_000_000
@@ -344,7 +346,7 @@ export class FakeNode {
         if (this.asks.some((a) => a.account === acct && a.thread_id === args.thread_id && a.status === 'open')) return refusal('conflict')
         if (this.invalidSurfaces > 0) {
           this.invalidSurfaces--
-          return refusal('bad_request', { reason: 'invalid_surface:component_shape' })
+          return refusal('bad_request', { reason: this.invalidReason })
         }
         const id = `ask-${this.asks.length + 1}`
         this.asks.push({
