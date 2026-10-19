@@ -9,6 +9,7 @@ import type { Mastra } from '@mastra/core'
 import { SpanType, type AnySpan } from '@mastra/core/observability'
 import { executeWithContext, getCurrentSpan } from '@mastra/core/observability/context-storage'
 import { observedLog, type Fields, type Log, type Trace } from '../hdtp/log.ts'
+import { refusalCode } from '../hdtp/node.ts'
 
 export function observe(mastra: Mastra): { log: Log; trace: Trace } {
   const instance = mastra.observability.getDefaultInstance()
@@ -18,11 +19,19 @@ export function observe(mastra: Mastra): { log: Log; trace: Trace } {
 
   const trace: Trace = async (name, fn) => {
     const span = start(name)
+    let result: Awaited<ReturnType<typeof fn>>
     try {
-      return await executeWithContext({ span, fn })
-    } finally {
-      span.end()
+      result = await executeWithContext({ span, fn })
+    } catch (e) {
+      // The span is marked failed by the error's code alone: its text and its stack may carry what a
+      // contact wrote or where the code runs, and the store is shown to whoever opens Studio.
+      const coded = new Error(refusalCode(e))
+      coded.stack = undefined
+      span.error({ error: coded, endSpan: true })
+      throw e
     }
+    span.end()
+    return result
   }
 
   // A loop started inside a span keeps that span as its context after the span has ended.

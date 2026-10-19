@@ -184,6 +184,19 @@ describe("the entry file's Mastra instance", () => {
     expect(await rootsOf('webhook_bad_signature')).toEqual(['webhook'])
   })
 
+  it('marks the span of a hit that failed as an error, by its code and never its text', async () => {
+    // A body that cannot be read: the receiver rejects, and the route answers 500.
+    const body = new ReadableStream({ pull: (c) => c.error(new Error('what a contact wrote')) })
+    const req = new Request('http://127.0.0.1/hdtp/webhook', { method: 'POST', body, duplex: 'half' } as RequestInit)
+    await expect(receive(req)).rejects.toThrow('what a contact wrote')
+    await mastra.observability.flush()
+    const s = await store()
+    const failed = (await s.listTraces({})).spans.filter((t) => t.name === 'webhook' && t.error)
+    expect(failed.map((t) => [t.status, t.error])).toEqual([['error', { message: 'unexpected', name: 'Error' }]])
+    const stored = JSON.stringify(await s.getTrace({ traceId: failed[0]!.traceId }))
+    expect(stored).not.toContain('what a contact wrote')
+  })
+
   it('runs each reconcile pass and each wait loop pass in a span of its own', async () => {
     const names = (await (await store()).listTraces({})).spans.map((t) => t.name)
     expect(names).toContain('reconcile')

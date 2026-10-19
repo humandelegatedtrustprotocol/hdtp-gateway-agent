@@ -166,7 +166,7 @@ Observability pages show what the agent did:
   agent run and its model call sit under the trace of the pass that drafted it: a new message wakes
   both the webhook and the wait loop, and a pass already on the thread, or the first to reach it,
   drafts. That trace holds the whole prompt and the draft: the persona, and the thread's messages as
-  the contact wrote them.
+  the contact wrote them. A pass whose work failed is shown as an error, by its code alone.
 - **Logs**: the agent's log lines from `info` up, with the same codes and fields it prints
   (`webhook_accepted`, `replied`, `agent_turn_cap`, and so on), each in its trace. A hit that draws
   no model call, such as a bad signature, a turn cap, the hourly limit or a contact the agent does
