@@ -51,7 +51,7 @@ Work in progress: the full README follows.
 ```sh
 cp .env.example .env   # then fill it in
 npm ci
-npm run dev            # Mastra Studio at http://localhost:4111 (this machine only; PORT moves it)
+npm run dev            # Mastra Studio at http://localhost:4111 (this machine only)
 make check             # typecheck, tests, build
 ```
 
