@@ -1,6 +1,6 @@
 {
   "name": "hdtp-gateway-agent",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "An open-source Mastra agent that answers an HDTP node's contacts on behalf of its owner",
   "license": "Apache-2.0",

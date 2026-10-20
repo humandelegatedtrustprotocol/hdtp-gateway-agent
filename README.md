@@ -19,22 +19,47 @@ an agent-answered capability finds no agent outside that minute, and the node fa
 The node holds each wait for at most 25 s, so the loop keeps the agent attached between sweeps.
 `docs/a2-observed.md` records runs against two real nodes.
 
-It needs a node whose owner MCP `read_thread` gives each message its `message_id`
-([hdtp-gateway#208](https://github.com/humandelegatedtrustprotocol/hdtp-gateway/issues/208)): the
-first hdtp-gateway release after v0.2.0, which carries #208 (v0.3.0 is planned). v0.2.0 and earlier
-give none, and the agent answers no thread of theirs (`message_id_missing` in its log). Each reply
-is sent under a `msg_id` derived from the id of the message it answers, so every path that reaches
-one message, in any process, sends one reply, which the node records once.
+## What it needs from the node
 
-It also needs the owner MCP's asks and notices (`ask_owner`, `notify_owner`, `list_asks`): the
-first hdtp-gateway release that carries them (N1, the owner's asks, on hdtp-gateway's
-`feat/owner-asks`; no release carries it yet). At start, before it reads any thread, the agent
-checks that the node offers every tool it calls. If one is missing it answers nothing, and logs
-one line naming the missing tools, for example
+It needs hdtp-gateway v0.3.0 or later. The owner MCP of v0.2.0 and earlier gives `read_thread` no
+`message_id` for a message ([hdtp-gateway#208](https://github.com/humandelegatedtrustprotocol/hdtp-gateway/issues/208)),
+and the agent answers no thread of theirs (`message_id_missing` in its log). Each reply is sent
+under a `msg_id` derived from the id of the message it answers, so every path that reaches one
+message, in any process, sends one reply, which the node records once.
+
+It also uses the owner MCP's asks and notices (`ask_owner`, `notify_owner`, `list_asks`). At start,
+before it reads any thread, the agent checks that the node offers every tool it calls. If one is
+missing it answers nothing, and logs one line naming the missing tools, for example
 `{"level":"warn","code":"tools_missing","tools":"ask_owner,notify_owner,list_asks"}`. A tool the
 node lists but the MCP client cannot take is named too, with the reason in `skipped`
 (`ask_owner:schema_too_large`, `schema_too_deep` or `schema_invalid`). After the node is upgraded,
 restart the agent.
+
+## Set it up
+
+1. In the node's portal, make an owner MCP token (Owners page, "Agent tokens": a label, then Create;
+   it is shown once) and add the webhook endpoint (Webhooks page; for an agent on the same machine,
+   `http://127.0.0.1:4111/hdtp/webhook`, every event). The page shows the endpoint's signing secret
+   once. Set the contact's trust to "May instruct your agent" on its page in the portal, or set
+   `HDTP_AGENT_ANSWER=all` (below).
+2. `cp .env.example .env` and fill in `OPENROUTER_API_KEY`, `HDTP_OWNER_TOKEN` (the token) and
+   `HDTP_WEBHOOK_SECRET` (the secret). `HDTP_OWNER_MCP_URL` defaults to the node's internal
+   listener, `http://127.0.0.1:8080/owner/mcp`; set it if yours is elsewhere.
+3. Replace the example `persona.md` (it answers for "Alex") with your own, or point
+   `HDTP_PERSONA_FILE` at one. The persona is read when the agent starts: restart after an edit.
+   `examples/personas/` has fourteen to start from.
+4. Run it:
+
+```sh
+npm ci
+npm run build
+npm start              # the built server on port 4111 (PORT changes it)
+```
+
+or `make dev` (`npm run dev`), which serves Mastra Studio as well (below). With no
+`HDTP_OWNER_TOKEN` the server still runs and the agent answers nothing, logging
+`{"level":"warn","code":"owner_token_unset"}`; with no `HDTP_WEBHOOK_SECRET` every webhook post is
+refused. `make check` runs the typecheck, the build and the tests. Node 22.13 or later.
 
 ## Each turn: reply, ask, notify or none
 
@@ -149,7 +174,7 @@ every pass after the first one since it started; a thread the owner read while t
 stopped is left to them.
 
 The first three rules are decided before the agent reads a thread, so whatever they leave is still
-unread in the owner's portal.
+unread in the owner's portal. The turn cap, the fourth, is not (it is the last rule below).
 
 - **Only contacts the owner trusts, by default.** A contact is trusted when the owner has set
   its trust to "May instruct your agent" (`may_instruct`) on the contact's page in the portal.
@@ -160,17 +185,29 @@ unread in the owner's portal.
   directory the agent was started from. Every later start reads it back, so a restart does not move
   it. A thread whose newest message is older is the owner's backlog. Delete the file to make the
   next start count as the first. A file that is there and cannot be read stops the agent answering
-  anything (`first_start_unreadable` in its log) until it is fixed or deleted.
+  anything (`first_start_unreadable` in its log) until it is fixed or deleted. So does a data
+  directory that cannot be written (`first_start_unwritable`), even when `first-start.json` is
+  already there and readable: the start writes its temporary file before it reads the kept one
+  ([#29](https://github.com/humandelegatedtrustprotocol/hdtp-gateway-agent/issues/29)). Make the
+  directory writable and restart.
 - **At most `HDTP_AGENT_REPLIES_PER_HOUR` drafts per contact per hour** (10 by default). Every
   turn drafted for any of their threads (a reply, an ask, a notice or none, sent or refused) and
   every answer to their requests count alike, whatever the messages' sender labels say. A restart
   starts every count again.
 - **`HDTP_AGENT_TURN_CAP` agent-to-agent turns in a row per thread** (3 by default), so two agents
-  cannot answer each other forever.
+  cannot answer each other forever. This one is decided after the thread is read, so a thread
+  stopped at the cap is marked read in the owner's portal
+  ([#25](https://github.com/humandelegatedtrustprotocol/hdtp-gateway-agent/issues/25)).
 
 ## What Studio shows
 
-`npm run dev` serves Mastra Studio at http://localhost:4111, to this machine only. Its
+`npm run dev` (or `make dev`) serves Mastra Studio at http://localhost:4111. The server binds 127.0.0.1 unless `MASTRA_HOST` names another address (`bindHost` in
+`src/mastra/origins.ts`), so with it unset, as in `.env.example`, Studio answers this machine only. In
+Studio you can chat with the `delegate` agent to try the persona. That chat is not the path a
+contact's message takes: Studio sends your text to the agent as plain text, while a message from
+a contact reaches it quoted as data inside a JSON block (`src/hdtp/prompt.ts`), so the same agent
+is framed differently, and a persona tried in Studio does not meet the framing contacts get
+([#5](https://github.com/humandelegatedtrustprotocol/hdtp-gateway-agent/issues/5)). Studio's
 Observability pages show what the agent did:
 
 - **Traces**: one for each webhook delivery the node signed and the agent had not seen (`webhook`), each reconcile pass
@@ -240,14 +277,5 @@ container), the persona's path and the owner MCP's address over what `agent.env`
 
   Mastra's `/api` routes ask for no credential, so they answer a caller inside the agent's network
   namespace only: `docker exec`, or a container started with `--network container:<the agent>`.
-
-Work in progress: the full README follows.
-
-```sh
-cp .env.example .env   # then fill it in
-npm ci
-npm run dev            # Mastra Studio at http://localhost:4111 (this machine only)
-make check             # typecheck, tests, build
-```
 
 Apache-2.0.
