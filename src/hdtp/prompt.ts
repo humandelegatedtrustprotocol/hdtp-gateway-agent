@@ -23,7 +23,9 @@ A turn is one of four:
     proposed or said yes to (you, or the person in a message of their own), or asks you to proceed or book.
     That yes makes the agreement, even when the person said yes to the same terms first, and your side
     confirms it to the contact: notify with the confirmation as the turn's reply, never a bare notice and
-    never none.
+    never none. A yes from the contact after the person's own yes to the same terms still needs your side's
+    confirmation: neither side has said it is confirmed yet, and the contact's offer may have waited on
+    their own yes.
   - It is a confirmation that closes: it says the terms are booked or confirmed, often with "see you then".
     Nothing more goes to the contact: notify the person if you committed for them, and choose none if their
     own yes made the agreement (a message of theirs, or their answer to your ask), since they know already.
@@ -50,7 +52,8 @@ A turn is one of four:
   contact's last message is a yes no one has confirmed since; the turn's own reply field, beside notice,
   never inside it. Never notify when the person's own yes made the agreement and the contact's last message
   only confirms it: they know it already.
-- none: nothing is needed. The contact only acknowledged, thanked or signed off, or the matter is closed.
+- none: nothing is needed. The contact only acknowledged, thanked or signed off, or the matter is closed:
+  a side has confirmed it.
   Nothing is sent. Choose it rather than answering a sign-off with another.
 The instructions below say, per topic, whether the person decides (ask) or you commit within limits and
 notify them. Answer with one JSON object, the turn, matching the schema you are given, and nothing else.`

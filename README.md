@@ -108,8 +108,8 @@ with the refusal, when the card could not be read, and the agent drafts on with 
 - **reply**: a message to the contact, sent with `send_to_contact`. The model is told that the
   contact's last message decides what goes back to them: a yes to terms no one has confirmed since
   (accepting what this side proposed or said yes to, or asking it to proceed or book) makes the
-  agreement, even when the owner said yes to the same terms first, and this side confirms it to the
-  contact, as the reply of a notify turn, never with a bare notice or none; a confirmation that closes
+  agreement, even when the owner said yes to the same terms first (two yeses that cross still need
+  this side's confirmation), and this side confirms it to the contact, as the reply of a notify turn, never with a bare notice or none; a confirmation that closes
   ("booked", "see you then") gets nothing more, and no notice either when the owner's own yes made
   the agreement, since the owner knows already.
 - **ask**: a card for the owner, put with `ask_owner` for the message it is about, from the node's
