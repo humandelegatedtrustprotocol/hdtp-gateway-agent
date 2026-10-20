@@ -65,8 +65,9 @@ refused. `make check` runs the typecheck, the build and the tests. Node 22.13 or
 
 For the contact's newest message the model returns one JSON object, one of four turns. Code checks
 it against a schema built from the node's own tool schemas (read from its `tools/list`), and refuses
-anything else by code (`draft:invalid_turn`); a refused turn is drafted again on a later pass, up to
-3 attempts, as a failed draft always was. A null the schema does not take is read as the field left
+anything else by code (`draft:invalid_turn`, or `draft:reply_in_notice` for a notify whose reply
+the model put inside the notice rather than beside it, which the schema's own issues cannot name); a
+refused turn is drafted again on a later pass, up to 3 attempts, as a failed draft always was. A null the schema does not take is read as the field left
 out, so a null on an optional field passes and one on a required field is still refused. Each
 draft is one model call capped at 4096 output tokens, reasoning included; a call that stops at the
 cap is refused (`draft:truncated`) and counts as a failed attempt, so a model that pads a turn
@@ -77,11 +78,15 @@ carries it as `node_reason` beside `reason`, and only when it is a code: no text
 logged.
 
 A retry is told what refused the attempt before it, so it does not repeat it: the code (the node's
-`invalid_surface:<rule>`, or the agent's own `draft:invalid_turn`, `turn_not_allowed`, `empty`,
-`truncated` or `reply_names_owner`) and a fixed line of the agent's saying what the code means,
-quoted to the model as data (`src/hdtp/refusals.ts` holds the lines, one for each of the node's
+`invalid_surface:<rule>`, or the agent's own `draft:invalid_turn`, `reply_in_notice`,
+`reply_dropped`, `turn_not_allowed`, `empty`, `truncated` or `reply_names_owner`) and a fixed
+line of the agent's saying what the code means, quoted to the model as data (`src/hdtp/refusals.ts` holds the lines, one for each of the node's
 surface rules). The node's own text is never passed on. A failure that is not the turn's (the model
-call failing, the hourly limit, the node unreachable) tells the retry nothing.
+call failing, the hourly limit, the node unreachable) tells the retry nothing. A retry after
+`reply_in_notice` still answers the contact, with a reply turn or a notify with its reply: any other
+turn is refused as `draft:reply_dropped`, and the retry after that is held the same way, so a reply
+dropped on every attempt ends with the turn given up, not with a notice and the contact left
+unanswered.
 
 When a contact's message is given up (`gave_up`, after 3 attempts), the owner is told: one notice
 on the thread, for that message, whose text the agent's code writes and the model never sees: "Waiting

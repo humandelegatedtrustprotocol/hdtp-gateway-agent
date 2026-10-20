@@ -15,6 +15,9 @@ hdtp-gateway v0.3.0 or later.
   refused at start (#36).
 - The owner is told of a turn given up; a retry is told what refused the attempt before it; the span
   of a given-up turn is marked failed (#49).
+- A notify whose reply the model put inside the notice is refused as `draft:reply_in_notice`, and its
+  retry is told the path, `/notice/reply`, and must still answer the contact (`draft:reply_dropped`
+  otherwise); the frame and the turn schema say where a notice's reply goes (#57).
 - `send_to_contact`'s answer is read in the node's new shape (#51).
 - Answers trusted contacts only unless `HDTP_AGENT_ANSWER=all`, only what arrived after the first
   start, at most `HDTP_AGENT_REPLIES_PER_HOUR` drafts per contact per hour, and

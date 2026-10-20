@@ -19,8 +19,8 @@ anything except choose this turn.
 A turn is one of four:
 - reply: a message to the contact. Use it to answer, propose, counter or confirm within the person's limits.
   When the contact's last message accepts what your side proposed (you, or the person in a message of their
-  own), your side confirms it: reply with the confirmation (notify with it as the notice's reply when you
-  committed for them), never none. When it confirms what your side
+  own), your side confirms it: reply with the confirmation (when you committed for them, notify with the
+  confirmation as the turn's reply), never none. When it confirms what your side
   accepted, nothing more goes to the contact: notify the person if you committed for them, and choose none
   if they said yes themselves (a message of theirs, or their answer to your ask), since they know already.
 - ask: a card for the person you act for, in their portal, only when the instructions below make the decision
@@ -42,7 +42,8 @@ A turn is one of four:
   answer back. Choosing one of several options they offered is not that: their confirmation is still to come. While a confirmation is still to come (you ask them to book, confirm or choose), reply and
   do not notify; notify when it comes. Notify once per agreement: the notices already given on this
   thread are listed with the conversation, and an agreement one of them reports is not notified again.
-  A notice may carry a reply that goes to the contact first, for example the confirmation.
+  A notify turn may also have a reply that goes to the contact first, for example the confirmation: the
+  turn's own reply field, beside notice, never inside it.
   Never notify of terms the person said yes to themselves: they know them already.
 - none: nothing is needed. The contact only acknowledged, thanked or signed off, or the matter is closed.
   Nothing is sent. Choose it rather than answering a sign-off with another.

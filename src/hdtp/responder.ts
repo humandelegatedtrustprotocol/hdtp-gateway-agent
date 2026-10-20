@@ -59,7 +59,8 @@
 // MAX_ATTEMPTS times; a process that stops in between loses it, because the node no longer
 // counts it unread. A request stays in list_pending until it is answered or expires, so each
 // reconcile pass reaches an unanswered one again. Each retry's prompt carries the previous
-// attempt's refusal, by code with this agent's line for it (refusals.ts), never the node's text.
+// attempt's refusal, by code with this agent's line for it (refusals.ts), never the node's text;
+// a retry after a reply put inside the notice must still answer the contact (REPLY_KEPT).
 // The last failed attempt marks the span it runs in as failed, by its code; for a contact's
 // message it also puts one notice for the owner, fixed text written here (GAVE_UP_SURFACE), so a
 // turn given up still reaches them; a notice the node does not take is logged and not put again.
@@ -143,6 +144,12 @@ export const GAVE_UP_SURFACE = [
     },
   },
 ] as const
+
+/**
+ * The refusals after which a thread's next attempt must still answer the contact (a reply, or a
+ * notify with its reply): the reply was put inside the notice, or the attempt after that dropped it.
+ */
+export const REPLY_KEPT: readonly string[] = ['draft:reply_in_notice', 'draft:reply_dropped']
 
 /** The trust flag of a contact this agent answers when it answers trusted contacts only. */
 export const TRUSTED = 'may_instruct'
@@ -370,6 +377,11 @@ export class Responder {
       const surface = { account_id: accountId, thread_id: row.thread_id, for_message_id: newest.message_id }
       const work = async (refused?: Refused) => {
         const turn = await this.write(contact, threadPrompt(messages, schema, allowed, { ask, decisions, notices, owner, refused }), allowed, owner)
+        // The attempt before put a reply where the schema has none: a misplaced field, which does
+        // not change that the contact was to be answered.
+        if (refused && REPLY_KEPT.includes(refused.refused) && turn.type !== 'reply' && !(turn.type === 'notify' && turn.reply !== undefined)) {
+          throw new NodeRefusal('draft', 'reply_dropped')
+        }
         const send = (text: string) =>
           this.node.sendToContact({ account_id: accountId, contact_fpr: row.contact_fpr, thread_id: row.thread_id, msg_id: key, text })
         switch (turn.type) {

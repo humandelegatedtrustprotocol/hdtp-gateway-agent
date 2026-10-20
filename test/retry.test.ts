@@ -13,8 +13,9 @@ import { toStandardSchema } from '@mastra/core/schema'
 import { describe, expect, it } from 'vitest'
 import { NodeRefusal, nodeClientOver } from '../src/hdtp/node.ts'
 import { DRAFT_REFUSALS, SURFACE_RULES, UNKNOWN_RULE, refusedOf } from '../src/hdtp/refusals.ts'
-import { GAVE_UP_SURFACE, GAVE_UP_TLDR, MAX_ATTEMPTS, Responder, type Draft } from '../src/hdtp/responder.ts'
-import { FakeNode, TOOLS, ask, memoryLog, reply, rules } from './fakes.ts'
+import { FIRST_TURNS, GAVE_UP_SURFACE, GAVE_UP_TLDR, MAX_ATTEMPTS, Responder, type Draft } from '../src/hdtp/responder.ts'
+import { Turns } from '../src/hdtp/turn.ts'
+import { FakeNode, TOOLS, ask, memoryLog, notify, reply, rules } from './fakes.ts'
 
 const NODE_RULES = JSON.parse(readFileSync(new URL('./surface-rules.json', import.meta.url), 'utf8')) as string[]
 
@@ -110,6 +111,106 @@ describe('a retry is told what refused the attempt before it', () => {
     expect(refusedOf(new NodeRefusal('draft', 'model_failed'))).toBeNull()
     expect(refusedOf(new NodeRefusal('ask_owner', 'unavailable'))).toBeNull()
     expect(refusedOf(new Error('draft: invalid_turn'))).toBeNull()
+  })
+})
+
+// Found in the U5 and U7 rehearsals (2026-10-20, #57): on a notify that also answered the contact
+// the model put reply inside notice; the retry was told only that the turn did not match the
+// schema, and in U7 it came back as a notice with no reply, so the contact was never told.
+describe('a reply put inside the notice', () => {
+  const tldr = 'Refund agreed: order 1042, 40 EUR'
+  const terms = { Order: '1042', Refund: '40 EUR' }
+  const text = 'Agreed: we refund the 40 EUR for order 1042 today.'
+  const nested = (top?: string) => {
+    const turn = JSON.parse(notify(tldr, terms, top)) as { notice: Record<string, unknown> }
+    turn.notice.reply = text
+    return JSON.stringify(turn)
+  }
+  const turns = () => {
+    const node = new FakeNode()
+    return new Turns(nodeClientOver(node.call, node.catalog))
+  }
+
+  it('is refused by its own code, alone or beside a reply where it belongs, and its why names the path', async () => {
+    for (const answer of [nested(), nested(text)]) {
+      await expect(turns().read(answer, FIRST_TURNS), answer).rejects.toMatchObject({ tool: 'draft', code: 'reply_in_notice' })
+    }
+    expect(refusedOf(new NodeRefusal('draft', 'reply_in_notice'))).toEqual({ refused: 'draft:reply_in_notice', why: DRAFT_REFUSALS.reply_in_notice })
+    expect(DRAFT_REFUSALS.reply_in_notice).toMatch(/^\/notice\/reply: /)
+  })
+
+  it('is read as left out when it is null, as any null optional field is', async () => {
+    const turn = JSON.parse(notify(tldr, terms, text)) as { notice: Record<string, unknown> }
+    const expected = structuredClone(turn)
+    turn.notice.reply = null
+    expect(await turns().read(JSON.stringify(turn), FIRST_TURNS)).toEqual(expected)
+    // A turn refused for something else is not told of a reply it does not have.
+    turn.notice.surface = []
+    await expect(turns().read(JSON.stringify(turn), FIRST_TURNS)).rejects.toMatchObject({ code: 'invalid_turn' })
+  })
+
+  it('takes a notice with its reply beside it, at the turn’s top level', async () => {
+    expect(await turns().read(notify(tldr, terms, text), FIRST_TURNS)).toMatchObject({ type: 'notify', reply: text })
+  })
+
+  it('tells the retry the path, and the retried turn sends the reply, then puts the notice', async () => {
+    const drafts = [nested(), notify(tldr, terms, text)]
+    const { node, prompts, responder } = setup(async () => drafts.shift()!)
+    node.inbound('th1', 'Yes, a refund of 40 EUR for order 1042 is fine, thank you.', 'agent')
+    await responder.onMessage('th1')
+    expect(node.sent).toEqual([])
+    await responder.reconcile()
+    expect(prompts).toHaveLength(2)
+    expect(refusalIn(prompts[1]!)).toEqual({ refused: 'draft:reply_in_notice', why: DRAFT_REFUSALS.reply_in_notice })
+    expect(node.sent.map((s) => s.text)).toEqual([text])
+    expect(node.notices).toHaveLength(1)
+  })
+
+  it('refuses a retry that drops the reply, as U7’s did, and the one after it still answers the contact', async () => {
+    const drafts = [nested(), notify(tldr, terms), notify(tldr, terms, text)]
+    const { node, log, prompts, responder } = setup(async () => drafts.shift()!)
+    node.inbound('th1', 'Yes, a refund of 40 EUR for order 1042 is fine, thank you.', 'agent')
+    await responder.onMessage('th1')
+    await responder.reconcile()
+    expect(log.lines.filter((l) => l.code === 'attempt_failed').map((l) => l.fields?.reason)).toEqual(['draft:reply_in_notice', 'draft:reply_dropped'])
+    expect(node.sent).toEqual([])
+    expect(node.notices).toEqual([])
+    await responder.reconcile()
+    expect(refusalIn(prompts[2]!)).toEqual({ refused: 'draft:reply_dropped', why: DRAFT_REFUSALS.reply_dropped })
+    expect(node.sent.map((s) => s.text)).toEqual([text])
+    expect(node.notices).toHaveLength(1)
+  })
+
+  it('gives the turn up when every retry drops the reply, and tells the owner it waits on them', async () => {
+    const drafts = [nested(), notify(tldr, terms), notify(tldr, terms)]
+    const { node, log, failed, responder } = setup(async () => drafts.shift()!)
+    node.inbound('th1', 'Yes, a refund of 40 EUR for order 1042 is fine, thank you.', 'agent')
+    await responder.onMessage('th1')
+    for (let i = 0; i < MAX_ATTEMPTS; i++) await responder.reconcile()
+    expect(log.lines.filter((l) => l.code === 'attempt_failed' || l.code === 'gave_up').map((l) => l.fields?.reason)).toEqual([
+      'draft:reply_in_notice',
+      'draft:reply_dropped',
+      'draft:reply_dropped',
+    ])
+    expect(node.sent).toEqual([])
+    expect(node.notices.map((n) => n.surface)).toEqual([GAVE_UP_SURFACE])
+    expect(failed).toEqual(['draft:reply_dropped'])
+  })
+
+  it('takes a reply turn as the retry, and holds no turn after any other refusal to a reply', async () => {
+    const drafts = [nested(), reply(text)]
+    const { node, responder } = setup(async () => drafts.shift()!)
+    node.inbound('th1', 'Yes, a refund of 40 EUR for order 1042 is fine, thank you.', 'agent')
+    await responder.onMessage('th1')
+    await responder.reconcile()
+    expect(node.sent.map((s) => s.text)).toEqual([text])
+    const other = ['not a turn', notify(tldr, terms)]
+    const second = setup(async () => other.shift()!)
+    second.node.inbound('th1', 'Thanks, the refund arrived.', 'agent')
+    await second.responder.onMessage('th1')
+    await second.responder.reconcile()
+    expect(second.node.sent).toEqual([])
+    expect(second.node.notices).toHaveLength(1)
   })
 })
 
