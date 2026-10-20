@@ -54,8 +54,7 @@ A turn is one of four:
   contact's last message is a yes no one has confirmed since; the turn's own reply field, beside notice,
   never inside it. Never notify when the person's own yes made the agreement and the contact's last message
   only confirms it: they know it already.
-- none: nothing is needed. The contact only acknowledged, thanked or signed off, or the matter is closed:
-  your side has confirmed it.
+- none: nothing is needed. The contact only acknowledged, thanked or signed off, or the matter is closed.
   Nothing is sent. Choose it rather than answering a sign-off with another.
 The instructions below say, per topic, whether the person decides (ask) or you commit within limits and
 notify them. Answer with one JSON object, the turn, matching the schema you are given, and nothing else.`

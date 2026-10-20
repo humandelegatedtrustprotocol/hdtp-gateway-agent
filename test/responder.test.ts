@@ -544,8 +544,8 @@ describe("a contact's words reach the model as data", () => {
     expect(frame).toContain('never a bare notice and never none.')
     // u4-1: the contact's yes crossing the person's own is confirmed too.
     expect(frame).toContain("A yes from the contact after the person's own yes to the same terms still needs your side's confirmation")
-    // u5-4: the contact's side confirming is a notice there, not none.
-    expect(frame).toContain('or the matter is closed: your side has confirmed it.')
+    // u5-4: the none bullet names no confirming side, so the contact's confirming is a notice there.
+    expect(frame).toContain('signed off, or the matter is closed. Nothing is sent.')
     expect(frame).toContain("the confirmation, whenever the contact's last message is a yes no one has confirmed since")
     expect(frame).not.toMatch(/choose none if they said yes themselves|Never notify of terms the person said yes to themselves/)
     // u1-4, u5-3: a notice's reply is the turn's own field (#57: the model nested it in notice).
