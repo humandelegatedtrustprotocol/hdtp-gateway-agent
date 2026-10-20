@@ -57,6 +57,13 @@ function hoist(schemas: Array<[string, JsonSchema]>): Record<string, unknown> {
   return defs
 }
 
+/**
+ * What the turn schema says of a notify's reply, after send_to_contact's own description of `text`
+ * when it has one: in the rehearsals of 2026-10-20 the model put the reply inside the notice in two
+ * of the three notify turns that had one (#57).
+ */
+export const NOTICE_REPLY = 'The message to the contact, sent before the notice: a field of the turn, beside notice, never inside it.'
+
 /** The turn schema, from the node's input schemas of send_to_contact, ask_owner and notify_owner. */
 export function turnSchema(send: JsonSchema, ask: JsonSchema, notify: JsonSchema): JsonSchema {
   for (const [tool, schema] of [
@@ -84,7 +91,7 @@ export function turnSchema(send: JsonSchema, ask: JsonSchema, notify: JsonSchema
     oneOf: [
       branch('reply', { text }, ['text']),
       branch('ask', { ask: surfaceOf('ask_owner', ask) }, ['ask']),
-      branch('notify', { notice: surfaceOf('notify_owner', notify), reply: text }, ['notice']),
+      branch('notify', { notice: surfaceOf('notify_owner', notify), reply: { ...text, description: [text.description, NOTICE_REPLY].filter(Boolean).join(' ') } }, ['notice']),
       branch('none'),
     ],
   }
@@ -98,6 +105,17 @@ function parse(answer: string): unknown {
   } catch {
     throw new NodeRefusal('draft', 'invalid_turn')
   }
+}
+
+/**
+ * Whether an answer is a notify with `reply` inside its notice, where the schema has no such field:
+ * the reply belongs beside notice. The validator's issues cannot say so, since they name the path
+ * of the object that has an extra field and not the field.
+ */
+function replyInNotice(value: unknown): boolean {
+  const o = value as Record<string, unknown> | null
+  const notice = o?.notice as Record<string, unknown> | null | undefined
+  return o?.type === 'notify' && typeof notice === 'object' && notice !== null && Object.hasOwn(notice, 'reply')
 }
 
 /**
@@ -168,8 +186,9 @@ export class Turns {
 
   /**
    * The turn in a model's answer, if it is one of `allowed`. Anything else is a refusal named draft:
-   * invalid_turn for an answer that is not a turn of the schema, turn_not_allowed for one that is
-   * and is not offered here. An answer the schema refuses is checked once more without its null
+   * invalid_turn for an answer that is not a turn of the schema, reply_in_notice for a notify the
+   * schema refuses that has its reply inside the notice, turn_not_allowed for one that is a turn and
+   * is not offered here. An answer the schema refuses is checked once more without its null
    * properties: a null on an optional field is read as the field left out, and a null on a required
    * one is still refused, as the field missing. Where the schema takes a null, the answer passes as
    * written. The validator's text is never kept. With `owner`, the person's display name, an ask
@@ -181,7 +200,7 @@ export class Turns {
     const value = parse(answer)
     let result = await check['~standard'].validate(value)
     if (result.issues) result = await check['~standard'].validate(withoutNulls(value))
-    if (result.issues) throw new NodeRefusal('draft', 'invalid_turn')
+    if (result.issues) throw new NodeRefusal('draft', replyInNotice(withoutNulls(value)) ? 'reply_in_notice' : 'invalid_turn')
     const turn = result.value as Turn
     if (!allowed.includes(turn.type)) throw new NodeRefusal('draft', 'turn_not_allowed')
     if ((turn.type === 'reply' && !turn.text.trim()) || (turn.type === 'notify' && turn.reply !== undefined && !turn.reply.trim())) {

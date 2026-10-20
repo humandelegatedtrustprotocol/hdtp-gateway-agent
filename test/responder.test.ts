@@ -535,6 +535,10 @@ describe("a contact's words reach the model as data", () => {
     // u1-5: the owner's own yes, confirmed by the contact, is none.
     expect(frame).toContain('choose none if they said yes themselves (a message of theirs, or their answer to your ask), since they know already.')
     expect(frame).toContain('Never notify of terms the person said yes to themselves: they know them already.')
+    // u1-4, u5-3: a notice's reply is the turn's own field (#57: the model nested it in notice).
+    expect(frame).toContain("notify with the confirmation as the turn's reply")
+    expect(frame).toContain("the turn's own reply field, beside notice, never inside it.")
+    expect(frame).not.toMatch(/notice's reply|notice may carry/)
   })
 
   it('under a frame that says so, ahead of any persona', () => {

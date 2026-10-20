@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 import { nodeClientOver, type NodeClient } from '../src/hdtp/node.ts'
 import { FRAME } from '../src/hdtp/prompt.ts'
 import { FIRST_TURNS, MAX_ATTEMPTS, Responder, type Draft, type Rules } from '../src/hdtp/responder.ts'
-import { FILLED_BY_CODE, Turns, names, readyReplies, turnSchema } from '../src/hdtp/turn.ts'
+import { FILLED_BY_CODE, NOTICE_REPLY, Turns, names, readyReplies, turnSchema } from '../src/hdtp/turn.ts'
 import { FakeNode, TOOLS, ask, memoryLog, none, notify, reply, rules, surface } from './fakes.ts'
 
 function setup(draft: Draft, over: Partial<Rules> = {}) {
@@ -593,6 +593,8 @@ describe('the turn schema', () => {
     }
     const [r, a, n] = built.oneOf
     expect(r!.properties.text).toEqual((schemaOf('send_to_contact') as { properties: Record<string, unknown> }).properties.text)
+    // A notify's reply is send_to_contact's text, described as the turn's own field (#57).
+    expect(n!.properties.reply).toEqual({ ...(schemaOf('send_to_contact') as { properties: Record<string, object> }).properties.text, description: NOTICE_REPLY })
     for (const k of FILLED_BY_CODE) {
       expect(a!.properties.ask!.properties).not.toHaveProperty(k)
       expect(n!.properties.notice!.properties).not.toHaveProperty(k)

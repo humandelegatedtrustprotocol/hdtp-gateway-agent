@@ -22,6 +22,10 @@ export interface Refused {
 export const DRAFT_REFUSALS: Readonly<Record<string, string>> = {
   invalid_turn:
     "The answer was not one JSON object matching the turn's JSON Schema: check every required field, every const (such as version and catalogId) and every enum.",
+  reply_in_notice:
+    '/notice/reply: reply is not a field of notice. It is a field of the turn, beside type and notice: keep the reply to the contact and move it there. Check the rest of the turn against the schema too.',
+  reply_dropped:
+    'The turn before this one answered the contact, with its reply in the wrong place; this one answers them too: a reply turn, or a notify with its reply beside notice.',
   turn_not_allowed: "The turn's type was not one of the turns offered for this message.",
   empty: 'The answer, or the text of its reply, was empty.',
   truncated: 'The answer was cut off at its length limit: write a shorter turn.',
