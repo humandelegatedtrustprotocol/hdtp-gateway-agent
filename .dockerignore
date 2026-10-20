@@ -1,0 +1,8 @@
+# The build reads package.json, package-lock.json, tsconfig.json, src/ and persona.md. Nothing of the
+# developer's (.env, data/, a build) goes into the image.
+*
+!package.json
+!package-lock.json
+!tsconfig.json
+!src/
+!persona.md

@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { DEFAULT_MODEL, readConfig } from '../src/hdtp/config.ts'
 import { FRAME } from '../src/hdtp/prompt.ts'
 import { delegate, instructions } from '../src/mastra/agents/delegate.ts'
-import { studioHosts, studioOrigins } from '../src/mastra/origins.ts'
+import { bindHost, loopbackPeer, loopbackPeersOnly, studioHosts, studioOrigins } from '../src/mastra/origins.ts'
 
 describe('the delegate agent', () => {
   it('is given no tools', async () => {
@@ -119,5 +119,47 @@ describe("Studio's hosts and origins", () => {
     expect(studioHosts({ PORT: '4300' })).toEqual(['localhost:4300', '127.0.0.1:4300'])
     expect(studioOrigins({})).toEqual(['http://localhost:4111', 'http://127.0.0.1:4111'])
     expect(studioOrigins({ PORT: '4300' })).toEqual(['http://localhost:4300', 'http://127.0.0.1:4300'])
+  })
+
+  it('are served on the loopback interface unless MASTRA_HOST names another address', () => {
+    expect(bindHost({})).toBe('127.0.0.1')
+    expect(bindHost({ MASTRA_HOST: ' ' })).toBe('127.0.0.1')
+    expect(bindHost({ MASTRA_HOST: '0.0.0.0' })).toBe('0.0.0.0')
+  })
+})
+
+/**
+ * Runs the peer rule as Mastra's Node server does: the socket a request came on is the context's
+ * `env.incoming.socket`. Answers 'next' when the rule lets the request through.
+ */
+async function peerRule(remoteAddress: string | undefined, env?: unknown): Promise<'next' | { status: number; body: unknown }> {
+  const c = {
+    env: env ?? { incoming: { socket: { remoteAddress } } },
+    json: (body: unknown, status: number) => Response.json(body, { status }),
+  }
+  let passed = false
+  const res = (await loopbackPeersOnly(c as never, async () => {
+    passed = true
+  })) as Response | undefined
+  return passed ? 'next' : { status: res!.status, body: await res!.json() }
+}
+
+describe('the peer rule', () => {
+  it('knows the loopback interface in each form a socket names it', () => {
+    for (const address of ['127.0.0.1', '127.0.0.53', '::1', '::ffff:127.0.0.1', '::FFFF:127.0.0.1']) {
+      expect(loopbackPeer(address), address).toBe(true)
+    }
+    for (const address of [undefined, '', '172.18.0.3', '10.127.0.1', '::ffff:172.18.0.3', '::2', 'fe80::1', '128.0.0.1']) {
+      expect(loopbackPeer(address), String(address)).toBe(false)
+    }
+  })
+
+  it('lets a loopback peer through and refuses any other, and a request with no socket, by its code', async () => {
+    expect(await peerRule('127.0.0.1')).toBe('next')
+    expect(await peerRule('::1')).toBe('next')
+    const refused = { status: 403, body: { code: 'peer_refused' } }
+    expect(await peerRule('172.18.0.3')).toEqual(refused)
+    expect(await peerRule(undefined)).toEqual(refused)
+    expect(await peerRule(undefined, {})).toEqual(refused)
   })
 })

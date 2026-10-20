@@ -1,0 +1,56 @@
+# hdtp-gateway-agent beside an hdtp-gateway node, in the node's compose project. Put this file, an
+# agent.env made from .env.example, and the persona as persona.md, in the directory of the node's
+# compose.yaml (Compose reads every relative path from there), then run from that directory:
+#
+#   docker compose -f compose.yaml -f compose.agent.yaml up -d
+#
+# The node posts its webhook to http://agent:4111/hdtp/webhook (the endpoint is added on the
+# portal's Webhooks page). Port 4111 is published nowhere, and a caller from another container
+# reaches only the webhook there (and Mastra's inert /api/auth routes): Mastra's /api routes ask for
+# no credential, so they answer the agent's own loopback only (README, "Who reaches port 4111").
+services:
+  agent:
+    image: ghcr.io/humandelegatedtrustprotocol/hdtp-gateway-agent:latest
+    restart: unless-stopped
+    env_file:
+      - path: agent.env
+        required: true
+    # The container's own layout, over what a copy of .env.example says.
+    environment:
+      HDTP_AGENT_DATA_DIR: /data
+      HDTP_PERSONA_FILE: /app/persona.md
+      HDTP_OWNER_MCP_URL: http://127.0.0.1:8080/owner/mcp
+    volumes:
+      - agent-data:/data
+      - type: bind
+        source: ./persona.md
+        target: /app/persona.md
+        read_only: true
+        bind:
+          create_host_path: false
+
+  # The owner MCP, at 127.0.0.1:8080 inside the agent's container. The node serves it on its own
+  # loopback only, and refuses a request that names any other host (DNS-rebinding protection), so
+  # http://hdtp-gateway:8081 is refused. This forwarder shares the agent's network namespace and
+  # listens on its loopback; it dials the node's portal forwarder (compose.yaml's `portal`), which
+  # dials the node's loopback. The agent's requests name 127.0.0.1:8080 all the way through.
+  agent-owner-mcp:
+    # The node's forwarder image, pinned by the same digest: `alpine/socat:latest` as resolved on
+    # 2026-10-08.
+    image: alpine/socat:latest@sha256:82ad20f6f6e29b91ff33b6662d24063522b1378f08fd8569cd3ab412cac13f50
+    restart: unless-stopped
+    network_mode: "service:agent"
+    # The agent's process namespace too, so the forwarder dies with the agent's process, and a
+    # restart of the agent's container (a crash, `docker restart`) brings it back inside the agent's
+    # new network, as the node's own forwarder does (compose.yaml, #204). A recreated agent takes an
+    # `up -d` of both (README, "In a container").
+    pid: "service:agent"
+    cap_drop: [ALL]
+    depends_on:
+      agent:
+        condition: service_started
+        restart: true
+    command: ["TCP-LISTEN:8080,bind=127.0.0.1,fork,reuseaddr", "TCP:hdtp-gateway:8081"]
+
+volumes:
+  agent-data:

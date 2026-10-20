@@ -3,7 +3,7 @@ import { nodeClientOver } from '../src/hdtp/node.ts'
 import { Responder } from '../src/hdtp/responder.ts'
 import type { Log, Trace } from '../src/hdtp/log.ts'
 import { SIGNATURE_HEADER } from '../src/hdtp/signature.ts'
-import { MAX_BODY_BYTES, createReceiver, type Handlers } from '../src/hdtp/webhook.ts'
+import { MAX_BODY_BYTES, Tally, createReceiver, type Handlers } from '../src/hdtp/webhook.ts'
 import { FakeNode, envelope, memoryLog, reply, rules, sign } from './fakes.ts'
 
 const secret = 'whsec_current'
@@ -69,6 +69,54 @@ describe('POST /hdtp/webhook', () => {
     release!()
     await tick(() => events.includes('end:webhook'))
     expect(events).toEqual(['open:webhook', 'webhook_accepted', 'webhook_task_failed', 'end:webhook'])
+  })
+
+  it('gives a hit no span and no line until its delivery is verified and new, and counts it', async () => {
+    const events: string[] = []
+    const log: Log = { info: (code) => void events.push(code), warn: (code) => void events.push(code) }
+    const trace: Trace = async (name, fn) => (events.push(`open:${name}`), fn())
+    const tally = new Tally()
+    let configured: string | undefined = secret
+    const receive = createReceiver({
+      secret: () => configured,
+      log,
+      trace,
+      tally,
+      now: () => now,
+      schedule: () => {},
+      handlers: { message: async () => {}, reconcile: async () => {}, request: async () => {} },
+    })
+    const body = envelope('evt_1', 'message.delivered', {})
+    const unreadable = new Request('http://agent/hdtp/webhook', {
+      method: 'POST',
+      body: new ReadableStream({ pull: (c) => c.error(new Error('gone')) }),
+      duplex: 'half',
+    } as RequestInit)
+    const statuses = [
+      await receive(post(body)),
+      await receive(post(body, { [SIGNATURE_HEADER]: 't=1,v1=' + '0'.repeat(64) })),
+      await receive(signed(envelope('evt_2', 'message.received', { pad: 'x'.repeat(MAX_BODY_BYTES) }))),
+      await receive(unreadable),
+      await receive(signed('not json')),
+      await receive(signed(body)),
+      await receive(signed(body)),
+    ].map((r) => r.status)
+    configured = undefined
+    statuses.push((await receive(signed(body))).status)
+    expect(statuses).toEqual([401, 401, 413, 400, 400, 200, 200, 503])
+    // The one verified, new delivery: its span and its line.
+    expect(events).toEqual(['open:webhook', 'webhook_ignored'])
+
+    const counts: Array<[string, unknown]> = []
+    const summary: Log = { info: () => {}, warn: (code, fields) => void counts.push([code, fields]) }
+    tally.flush(summary)
+    tally.flush(summary)
+    expect(counts).toEqual([
+      [
+        'webhook_untraced',
+        { bad_signature: 2, too_large: 1, unreadable: 1, bad_envelope: 1, duplicate: 1, webhook_secret_unset: 1 },
+      ],
+    ])
   })
 
   it('refuses a forged body before any call to the node', async () => {

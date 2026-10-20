@@ -5,9 +5,15 @@
 // `type` (signed) decides what happens, never the unsigned X-HDTP-Event-Type header. The answer
 // is sent before the work starts: the node's sender, as planned (not built yet), makes one attempt
 // with a 10 s timeout, and a model call can take longer than that.
+//
+// Anyone who can reach the route can post to it, and what Studio shows is held in memory for 24
+// hours. So a hit gets a span, and lines of its own, only once its delivery is verified and new: a
+// delivery only the node can sign. Every other hit (refused before or at the signature, a signed
+// body that is not an envelope, a delivery posted again) is counted by its answer's code, and the
+// counts are logged as one line, at most once every UNTRACED_EVERY_MS.
 
 import { Bounded } from './bounded.ts'
-import { untraced, type Log, type Trace } from './log.ts'
+import { untraced, type Fields, type Log, type Trace } from './log.ts'
 import { refusalCode } from './node.ts'
 import { SIGNATURE_HEADER, verifySignature } from './signature.ts'
 
@@ -15,6 +21,23 @@ import { SIGNATURE_HEADER, verifySignature } from './signature.ts'
 export const MAX_BODY_BYTES = 64 * 1024
 /** How many event ids are remembered, so a delivery posted twice is handled once. */
 export const SEEN_EVENTS = 10_000
+/** How often the counts of the hits not traced one by one are logged, when there are any. */
+export const UNTRACED_EVERY_MS = 60 * 1000
+
+/** The hits answered with no span and no line of their own, counted by their answer's code. */
+export class Tally {
+  private readonly counts = new Map<string, number>()
+  count(code: string): void {
+    this.counts.set(code, (this.counts.get(code) ?? 0) + 1)
+  }
+  /** Logs every count as one line, webhook_untraced, when there is one, and starts again from none. */
+  flush(log: Log): void {
+    if (this.counts.size === 0) return
+    const fields: Fields = Object.fromEntries(this.counts)
+    this.counts.clear()
+    log.warn('webhook_untraced', fields)
+  }
+}
 
 export interface Envelope {
   id: string
@@ -42,6 +65,8 @@ export interface ReceiverOptions {
   now?: () => number
   /** Runs a task after the answer is sent. */
   schedule?: (task: () => Promise<void>) => void
+  /** Where the hits that get no span are counted; the caller logs it every UNTRACED_EVERY_MS. */
+  tally?: Tally
 }
 
 /** The body, or null when it is longer than `limit` bytes. Reads no further than the limit. */
@@ -98,25 +123,30 @@ export function createReceiver(opts: ReceiverOptions): (req: Request) => Promise
   const trace = opts.trace ?? untraced
   const schedule = opts.schedule ?? ((task) => void setImmediate(() => void task()))
   const seen = new Bounded<true>(SEEN_EVENTS)
+  const tally = opts.tally ?? new Tally()
 
-  /** The answer, and the task to run after it is sent. */
-  const handle = async (req: Request): Promise<[Response, (() => Promise<void>) | null]> => {
+  /** The verified, new envelope, or the answer to a hit that gets no span, counted by its code. */
+  const verify = async (req: Request): Promise<Envelope | Response> => {
+    const refuse = (status: number, code: string, body: Record<string, string> = { code }) => {
+      tally.count(code)
+      return answer(status, body)
+    }
     const secret = opts.secret()
-    if (!secret) {
-      opts.log.warn('webhook_secret_unset')
-      return [answer(503, { code: 'webhook_secret_unset' }), null]
-    }
-    const body = await readBounded(req, MAX_BODY_BYTES)
-    if (body === null) return [answer(413, { code: 'too_large' }), null]
-    if (!verifySignature(secret, body, req.headers.get(SIGNATURE_HEADER), now())) {
-      opts.log.warn('webhook_bad_signature')
-      return [answer(401, { code: 'bad_signature' }), null]
-    }
+    if (!secret) return refuse(503, 'webhook_secret_unset')
+    // A body the sender stops sending part-way is not a delivery of the node's either.
+    const body = await readBounded(req, MAX_BODY_BYTES).catch(() => undefined)
+    if (body === undefined) return refuse(400, 'unreadable')
+    if (body === null) return refuse(413, 'too_large')
+    if (!verifySignature(secret, body, req.headers.get(SIGNATURE_HEADER), now())) return refuse(401, 'bad_signature')
     const env = parseEnvelope(body)
-    if (!env) return [answer(400, { code: 'bad_envelope' }), null]
-    if (seen.has(env.id)) return [answer(200, { status: 'duplicate' }), null]
+    if (!env) return refuse(400, 'bad_envelope')
+    if (seen.has(env.id)) return refuse(200, 'duplicate', { status: 'duplicate' })
     seen.set(env.id, true)
+    return env
+  }
 
+  /** The answer to a verified, new delivery, and the task to run after it is sent. */
+  const handle = (env: Envelope): [Response, (() => Promise<void>) | null] => {
     const h = opts.handlers
     let task: (() => Promise<void>) | null = null
     if (env.type === 'message.received') {
@@ -135,10 +165,12 @@ export function createReceiver(opts: ReceiverOptions): (req: Request) => Promise
     return [answer(202, { status: 'accepted' }), task]
   }
 
-  return (req) =>
-    new Promise<Response>((answered, failed) => {
+  return async (req) => {
+    const env = await verify(req)
+    if (env instanceof Response) return env
+    return new Promise<Response>((answered, failed) => {
       trace('webhook', async () => {
-        const [response, task] = await handle(req)
+        const [response, task] = handle(env)
         answered(response)
         if (!task) return
         // The span stays open until the task, and its failure's line, are done.
@@ -151,4 +183,5 @@ export function createReceiver(opts: ReceiverOptions): (req: Request) => Promise
         )
       }).catch(failed)
     })
+  }
 }
