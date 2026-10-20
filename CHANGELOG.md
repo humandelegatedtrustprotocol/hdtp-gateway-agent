@@ -19,7 +19,8 @@ hdtp-gateway v0.3.0 or later.
   retry is told the path, `/notice/reply`, and must still answer the contact (`draft:reply_dropped`
   otherwise); the frame and the turn schema say where a notice's reply goes (#57).
 - A contact's own yes to terms nobody has confirmed since gets a confirmation to the contact as well as a
-  notice to the owner; inbound messages are labelled `contact` (the contact wrote it) or `contact's agent`,
+  notice to the owner, when the agent may commit to them (within the owner's limits, or the owner said yes
+  to them); inbound messages are labelled `contact` (the contact wrote it) or `contact's agent`,
   the peer's claim, which the model reads and no permission rests on (#64, part of #60).
 - `send_to_contact`'s answer is read in the node's new shape (#51).
 - Answers trusted contacts only unless `HDTP_AGENT_ANSWER=all`, only what arrived after the first
@@ -36,7 +37,8 @@ hdtp-gateway v0.3.0 or later.
 - `docs/a2-observed.md`: the agent against two real nodes (#16); `docs/advisories.md`: each npm
   advisory read against how the agent uses the package (#23).
 - Known, open: #60 (when both owners' yeses cross, the agent receiving the second often closes nothing:
-  the eval's u4-1 point passed 0 to 1 runs of 4 across four frame wordings), #5 (Studio frames text differently from the webhook path), #25 (a thread stopped at the
+  the eval's u4-1 point passed 0 or 1 run at each of four frame wordings, 0 of 2 at the one released),
+  #5 (Studio frames text differently from the webhook path), #25 (a thread stopped at the
   turn cap is marked read), #29 (an unwritable data directory leaves the agent idle even with a
   readable `first-start.json`), #39 (an ask answered with no message is not drafted for again after a
   restart until the contact writes).
