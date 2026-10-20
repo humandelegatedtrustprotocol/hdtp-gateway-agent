@@ -15,7 +15,7 @@ const conversation = (prompt: string) => JSON.parse(prompt.split('```')[1]!.repl
 describe('the turn eval', () => {
   it('drafts for a contact’s newest message at every point, with a persona that exists and turns that are offered', async () => {
     const schema = await turns.schema()
-    expect(POINTS).toHaveLength(11)
+    expect(new Set(POINTS.map((p) => p.id)).size).toBe(POINTS.length)
     for (const p of POINTS) {
       expect(p.messages.at(-1)!.direction, p.id).toBe('in')
       expect(existsSync(PERSONAS[p.persona]), p.id).toBe(true)
@@ -31,6 +31,16 @@ describe('the turn eval', () => {
     expect(yes('u1-4')).toBe('contact')
   })
 
+  it('shows the owner’s own yes before the contact’s at the points where the yeses cross (#60)', async () => {
+    const schema = await turns.schema()
+    for (const [id, owner] of [['u3-1', 'Corvane Compute'], ['u4-1', 'Sam']] as const) {
+      const p = POINTS.find((q) => q.id === id)!
+      const [theirs, last] = conversation(promptFor(p, schema)).slice(-2).map((m) => m.from)
+      expect([theirs, last], id).toEqual([owner, 'contact'])
+      expect(p.context.decisions, id).toHaveLength(1)
+    }
+  })
+
   it('tells a notice with a reply from one without', () => {
     const u53 = POINTS.find((p) => p.id === 'u5-3')!
     expect(passes(u53, { type: 'notify', notice: {}, reply: 'Booked.' })).toBe(true)
@@ -39,11 +49,11 @@ describe('the turn eval', () => {
   })
 
   it('makes at most CEILING calls a run', () => {
-    expect(plan(5)).toHaveLength(11)
+    expect(plan(5)).toHaveLength(POINTS.length)
     expect(POINTS.length * 5).toBe(CEILING)
-    expect(() => plan(6)).toThrow(/over 55 calls/)
+    expect(() => plan(6)).toThrow(new RegExp(`over ${CEILING} calls`))
     expect(() => plan(0)).toThrow()
-    expect(plan(55, ['u1-3'])).toHaveLength(1)
+    expect(plan(CEILING, ['u1-3'])).toHaveLength(1)
     expect(() => plan(1, ['u9-9'])).toThrow(/unknown point/)
   })
 
@@ -51,6 +61,6 @@ describe('the turn eval', () => {
     const run = spawnSync(process.execPath, ['eval/run.ts', '--dry'], { env: { ...process.env, OPENROUTER_API_KEY: '' }, encoding: 'utf8' })
     expect(run.status, run.stderr).toBe(0)
     expect(run.stdout).toBe('')
-    expect(run.stderr).toMatch(/^dry: 11 points x 5 runs = 55 calls/)
+    expect(run.stderr).toMatch(new RegExp(`^dry: ${POINTS.length} points x 5 runs = ${CEILING} calls`))
   })
 })

@@ -1,5 +1,5 @@
-// The decision points the turn eval drafts for (eval/run.ts): the U1 meeting and the U5 dentist
-// stories of examples/personas/, each point the thread as the deciding side's node would hand it
+// The decision points the turn eval drafts for (eval/run.ts): the U1 meeting, U3 GPU order, U4 rent
+// and U5 dentist stories of examples/personas/, each point the thread as the deciding side's node would hand it
 // over, and the turns that pass there. Hermetic: test/eval.test.ts builds every prompt with no model.
 
 import type { JsonSchema, ThreadMessage } from '../src/hdtp/node.ts'
@@ -7,14 +7,13 @@ import { threadPrompt, type ThreadContext } from '../src/hdtp/prompt.ts'
 import { FIRST_TURNS } from '../src/hdtp/responder.ts'
 import type { Turn } from '../src/hdtp/turn.ts'
 
-/** The most model calls one run of the eval makes: 11 points, 5 runs each. */
-export const CEILING = 55
-
-export type Persona = 'ana' | 'ben' | 'clinic' | 'patient'
+export type Persona = 'ana' | 'ben' | 'vendor' | 'tenant' | 'clinic' | 'patient'
 
 export const PERSONAS: Record<Persona, string> = {
   ana: 'examples/personas/u1-meeting-ana.md',
   ben: 'examples/personas/u1-meeting-ben.md',
+  vendor: 'examples/personas/u3-gpu-vendor.md',
+  tenant: 'examples/personas/u4-rent-tenant.md',
   clinic: 'examples/personas/u5-dentist-clinic.md',
   patient: 'examples/personas/u5-dentist-patient.md',
 }
@@ -23,6 +22,8 @@ export const PERSONAS: Record<Persona, string> = {
 export const OWNERS: Record<Persona, string> = {
   ana: 'Ana',
   ben: 'Ben',
+  vendor: 'Corvane Compute',
+  tenant: 'Sam',
   clinic: 'Larchmere Dental',
   patient: 'Jo',
 }
@@ -40,7 +41,7 @@ export interface Point {
   context: ThreadContext
 }
 
-type Line = [side: Persona, sender: 'human' | 'agent', body: string]
+type Line = [side: Persona | 'buyer' | 'landlord', sender: 'human' | 'agent', body: string]
 
 const MEETING: Line[] = [
   ['ben', 'human', 'Hi Ana, can we meet this week about the project?'],
@@ -67,6 +68,28 @@ const COUNTER: Line[] = [
   ['ben', 'agent', 'Wednesday 14:00\u201314:30 works for me. Please include both the budget and timeline on the agenda.'],
 ]
 
+// The U3 take's thread (2026-10-20) in the example personas' names and numbers: the buyer asks below
+// the vendor's floor, the vendor's owner says yes on the ask, and the buyer's yes arrives after it.
+const ORDER: Line[] = [
+  ['buyer', 'human', 'Hi, we need 8 H-class GPUs on one host for 3 months, from 1 December. What can you offer?'],
+  ['vendor', 'agent', 'We can offer an 8-GPU H-class host from 24 November, for 3 months at 2.60 USD per GPU-hour, billed monthly. Shall we start on 1 December?'],
+  ['buyer', 'agent', '1 December works. Our ceiling is 2.40 USD per GPU-hour for the 3 months. Can you meet that?'],
+  // The ready reply the vendor's owner chose on their agent's ask.
+  ['vendor', 'human', 'Yes, we can do 2.40 USD per GPU-hour for one 8-GPU H-class host for 3 months from 1 December.'],
+  ['buyer', 'human', 'Yes, these terms work for me. Please proceed with the order.'],
+]
+
+// The U4 take's thread (2026-10-20) in the example personas' names and numbers: both owners say yes
+// on their agents' asks, the tenant first, and the landlord's yes arrives at the tenant's agent.
+const RENEWAL: Line[] = [
+  ['landlord', 'human', 'Hi Sam, your lease ends on 31 December. Shall we talk about renewing it?'],
+  ['tenant', 'agent', "Hi, this is Sam's agent. Happy to talk about renewing: the rent is 1,800 USD a month now. What rent and term did you have in mind?"],
+  ['landlord', 'agent', '1,854 USD a month for a 12-month renewal. Would that work?'],
+  // The ready reply the tenant chose on their agent's ask.
+  ['tenant', 'human', 'Yes, 1,854 USD a month for 12 months works for me.'],
+  ['landlord', 'human', 'Yes, I agree to renew for 12 months at 1,854 USD a month.'],
+]
+
 /** The first `n` lines of a story as `me`'s node lists them: its own lines out, the other side's in. */
 function seen(story: Line[], me: Persona, n: number): ThreadMessage[] {
   return story.slice(0, n).map(([side, sender, body], i) => ({
@@ -82,6 +105,8 @@ function seen(story: Line[], me: Persona, n: number): ThreadMessage[] {
 
 /** What Ana's node records as her answer to her agent's ask on Ben's counter: the reply she chose. */
 const ANAS_ANSWER = `Ana chose: "${MEETING[3]![2]}"`
+const VENDORS_ANSWER = `Corvane Compute chose: "${ORDER[3]![2]}"`
+const TENANTS_ANSWER = `Sam chose: "${RENEWAL[3]![2]}"`
 
 export const POINTS: Point[] = [
   { id: 'u1-1', title: 'Ana on "meet this week?"', persona: 'ana', expected: ['reply'], messages: seen(MEETING, 'ana', 1), context: {} },
@@ -107,12 +132,32 @@ export const POINTS: Point[] = [
     context: { notices: ['Meeting with Ana confirmed: Wed 15:00, 30 min'] },
   },
   { id: 'u1-7', title: 'Ana on the agenda and time counter', persona: 'ana', expected: ['ask'], messages: seen(COUNTER, 'ana', 3), context: {} },
+  // The contact's yes makes the agreement, after the owner's own: confirm it to them, and tell the owner.
+  {
+    id: 'u3-1',
+    title: "Vendor on the buyer's yes and proceed",
+    persona: 'vendor',
+    expected: ['notify+reply'],
+    messages: seen(ORDER, 'vendor', 5),
+    context: { decisions: [VENDORS_ANSWER] },
+  },
+  {
+    id: 'u4-1',
+    title: "Tenant on the landlord's crossing yes",
+    persona: 'tenant',
+    expected: ['notify+reply'],
+    messages: seen(RENEWAL, 'tenant', 5),
+    context: { decisions: [TENANTS_ANSWER] },
+  },
   { id: 'u5-1', title: "Clinic on the patient's request", persona: 'clinic', expected: ['reply'], messages: seen(DENTIST, 'clinic', 1), context: {} },
   // A confirmation is still to come from the clinic, so no notice yet.
   { id: 'u5-2', title: 'Patient on the offered slots', persona: 'patient', expected: ['reply'], messages: seen(DENTIST, 'patient', 2), context: {} },
   { id: 'u5-3', title: 'Clinic on the booking', persona: 'clinic', expected: ['notify+reply'], messages: seen(DENTIST, 'clinic', 3), context: {} },
   { id: 'u5-4', title: "Patient on the clinic's confirmation", persona: 'patient', expected: ['notify', 'notify+reply'], messages: seen(DENTIST, 'patient', 4), context: {} },
 ]
+
+/** The most model calls one run of the eval makes: 5 runs of every point. */
+export const CEILING = POINTS.length * 5
 
 /** The prompt the responder would write for the point: the first turn on its newest message. */
 export function promptFor(point: Point, schema: JsonSchema): string {

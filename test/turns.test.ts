@@ -595,6 +595,8 @@ describe('the turn schema', () => {
     expect(r!.properties.text).toEqual((schemaOf('send_to_contact') as { properties: Record<string, unknown> }).properties.text)
     // A notify's reply is send_to_contact's text, described as the turn's own field (#57).
     expect(n!.properties.reply).toEqual({ ...(schemaOf('send_to_contact') as { properties: Record<string, object> }).properties.text, description: NOTICE_REPLY })
+    // ...and as the confirmation the contact's yes is owed (#60).
+    expect(NOTICE_REPLY).toContain("Your side's confirmation, whenever the contact's last message says yes to terms no one has confirmed since")
     for (const k of FILLED_BY_CODE) {
       expect(a!.properties.ask!.properties).not.toHaveProperty(k)
       expect(n!.properties.notice!.properties).not.toHaveProperty(k)

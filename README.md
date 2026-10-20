@@ -105,10 +105,13 @@ until the agent restarts. A card with no name, or a node whose `export_card` giv
 owner labelled "person" (`owner_name` in the log says whether a name was read; `owner_name_unread`,
 with the refusal, when the card could not be read, and the agent drafts on with "person").
 
-- **reply**: a message to the contact, sent with `send_to_contact`. The model is told that when the
-  contact accepts what this side proposed, this side confirms it with a reply rather than none; and
-  that when the contact confirms a yes the owner gave themselves, nothing more is sent and no notice
-  is put, since the owner knows already.
+- **reply**: a message to the contact, sent with `send_to_contact`. The model is told that the
+  contact's last message decides what goes back to them: a yes to terms no one has confirmed since
+  (accepting what this side proposed or said yes to, or asking it to proceed or book) makes the
+  agreement, even when the owner said yes to the same terms first, and this side confirms it to the
+  contact, as the reply of a notify turn, never with a bare notice or none; a confirmation that closes
+  ("booked", "see you then") gets nothing more, and no notice either when the owner's own yes made
+  the agreement, since the owner knows already.
 - **ask**: a card for the owner, put with `ask_owner` for the message it is about, from the node's
   component catalog: a one-line TLDR and the key terms first, then one to three ready replies, each
   a Button the owner taps once to send it, and last a box to write their own with the Button that
@@ -135,7 +138,8 @@ with the refusal, when the card could not be read, and the agent drafts on with 
   agreed. The model is told that something is agreed only once both sides have said yes to the same
   terms, so a reply that still asks the contact to book or confirm goes without a notice, and the
   notice follows their confirmation; choosing one of several options the contact offered is not yet
-  an agreement; and terms the owner said yes to themselves are never notified. It is shown the TLDRs of the notices already put on the thread,
+  an agreement; and an agreement the owner's own yes made, which the contact only confirms, is never
+  notified. The turn schema describes a notify's reply as that confirmation too. It is shown the TLDRs of the notices already put on the thread,
   and told not to notify one agreement twice. In code, a notice is put for the message it answers
   and the node keeps one per message. A reply to the contact may go with it, sent first. A notice
   the node did not take is put again on later passes, with no new draft.

@@ -533,8 +533,13 @@ describe("a contact's words reach the model as data", () => {
     // u5-2: picking one of the contact's options waits for their confirmation, so no notice yet.
     expect(frame).toContain('Choosing one of several options they offered is not that: their confirmation is still to come.')
     // u1-5: the owner's own yes, confirmed by the contact, is none.
-    expect(frame).toContain('choose none if they said yes themselves (a message of theirs, or their answer to your ask), since they know already.')
-    expect(frame).toContain('Never notify of terms the person said yes to themselves: they know them already.')
+    expect(frame).toContain('choose none if their own yes made the agreement (a message of theirs, or their answer to your ask), since they know already.')
+    expect(frame).toContain("Never notify when the person's own yes made the agreement and the contact's last message only confirms it: they know it already.")
+    // u1-4, u3-1, u4-1: the contact's yes makes the agreement, after the owner's own too, and is confirmed to them (#60).
+    expect(frame).toContain('That yes makes the agreement, even when the person said yes to the same terms first, and your side confirms it to the contact')
+    expect(frame).toContain('never a bare notice and never none.')
+    expect(frame).toContain("the confirmation, whenever the contact's last message is a yes no one has confirmed since")
+    expect(frame).not.toMatch(/choose none if they said yes themselves|Never notify of terms the person said yes to themselves/)
     // u1-4, u5-3: a notice's reply is the turn's own field (#57: the model nested it in notice).
     expect(frame).toContain("notify with the confirmation as the turn's reply")
     expect(frame).toContain("the turn's own reply field, beside notice, never inside it.")
