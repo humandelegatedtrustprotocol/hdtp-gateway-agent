@@ -2,7 +2,7 @@
 // only by hand, so what it drafts for is checked here on every commit.
 
 import { spawnSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { CEILING, PERSONAS, POINTS, passes, plan, promptFor } from '../eval/points.ts'
 import { FIRST_TURNS } from '../src/hdtp/responder.ts'
@@ -48,9 +48,11 @@ describe('the turn eval', () => {
     expect(passes(u53, { type: 'reply', text: 'Booked.' })).toBe(false)
   })
 
-  it('makes at most CEILING calls a run', () => {
+  it('makes at most CEILING calls a run, as the README says', () => {
     expect(plan(5)).toHaveLength(POINTS.length)
-    expect(POINTS.length * 5).toBe(CEILING)
+    const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8').replace(/\s+/g, ' ')
+    expect(Number(/drafts the turn at (\d+) points/.exec(readme)?.[1])).toBe(POINTS.length)
+    expect(Number(/(\d+) model calls, the most one run makes/.exec(readme)?.[1])).toBe(CEILING)
     expect(() => plan(6)).toThrow(new RegExp(`over ${CEILING} calls`))
     expect(() => plan(0)).toThrow()
     expect(plan(CEILING, ['u1-3'])).toHaveLength(1)

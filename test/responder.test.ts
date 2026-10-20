@@ -536,11 +536,16 @@ describe("a contact's words reach the model as data", () => {
     expect(frame).toContain('choose none if their own yes made the agreement (a message of theirs, or their answer to your ask), since they know already.')
     expect(frame).toContain("Never notify when the person's own yes made the agreement and the contact's last message only confirms it: they know it already.")
     // u1-4, u3-1, u4-1: the contact's yes makes the agreement, after the owner's own too, and is confirmed to them (#60).
-    expect(frame).toContain('That yes makes the agreement, even when the person said yes to the same terms first, and your side confirms it to the contact')
+    expect(frame).toContain('It does so even when the person said yes to the same terms first, and your side confirms it to the contact')
+    // An ask-first topic the person has not said yes to is not committed by the contact's yes (u1-8).
+    expect(frame).toContain("That yes makes the agreement when your side may commit to them: within the person's limits, or the person said yes to them.")
+    // u1-4, u3-1, u4-1: the contact's own yes waits for an agent's confirmation (#60).
+    expect(frame).toContain('A yes the contact wrote themselves is their decision, like the person\'s own: it does not close the matter; the confirmation that closes comes from an agent, theirs or yours.')
     expect(frame).toContain('never a bare notice and never none.')
     // u4-1: the contact's yes crossing the person's own is confirmed too.
     expect(frame).toContain("A yes from the contact after the person's own yes to the same terms still needs your side's confirmation")
-    expect(frame).toContain('or the matter is closed: a side has confirmed it.')
+    // u5-4: the contact's side confirming is a notice there, not none.
+    expect(frame).toContain('or the matter is closed: your side has confirmed it.')
     expect(frame).toContain("the confirmation, whenever the contact's last message is a yes no one has confirmed since")
     expect(frame).not.toMatch(/choose none if they said yes themselves|Never notify of terms the person said yes to themselves/)
     // u1-4, u5-3: a notice's reply is the turn's own field (#57: the model nested it in notice).

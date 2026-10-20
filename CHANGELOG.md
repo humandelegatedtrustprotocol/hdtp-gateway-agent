@@ -29,7 +29,7 @@ hdtp-gateway v0.3.0 or later.
 - Studio's Observability pages show every webhook, pass and log line, in memory for 24 hours (#41);
   a webhook the agent refuses keeps no span (#46).
 - The agent as an image, `compose.agent.yaml` beside the node, and `MASTRA_HOST` (#46).
-- `make eval`: the turn eval, 55 model calls at most.
+- `make eval`: the turn eval, 5 runs of each point at most (`CEILING` in `eval/points.ts`).
 - `docs/a2-observed.md`: the agent against two real nodes (#16); `docs/advisories.md`: each npm
   advisory read against how the agent uses the package (#23).
 - Known, open: #5 (Studio frames text differently from the webhook path), #25 (a thread stopped at the

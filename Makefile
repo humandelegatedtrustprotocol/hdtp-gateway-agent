@@ -26,7 +26,7 @@ node_modules: package-lock.json
 	npm ci
 	@touch node_modules
 
-# The turn eval (eval/run.ts): real model calls, 55 at most, so not part of check. EVAL passes its
+# The turn eval (eval/run.ts): real model calls, eval/points.ts's CEILING at most, so not part of check. EVAL passes its
 # flags, e.g. EVAL=--dry, or EVAL='--runs 1 --only u1-3'.
 eval: node_modules
 	@node --env-file-if-exists=.env eval/run.ts $(EVAL)

@@ -68,6 +68,14 @@ const COUNTER: Line[] = [
   ['ben', 'agent', 'Wednesday 14:00\u201314:30 works for me. Please include both the budget and timeline on the agenda.'],
 ]
 
+// A meeting outside Ben's "commit within limits" topic (no budget or timeline on the agenda): his
+// agent may propose a time, and Ana's own yes to it waits on Ben's final yes.
+const DEMO: Line[] = [
+  ['ana', 'human', 'Hi Ben, could we meet this week for a demo of your prototype?'],
+  ['ben', 'agent', "Hi Ana, this is Ben's agent. Ben could do Thursday at 14:00 for 30 minutes for the demo. Would that work?"],
+  ['ana', 'human', 'Yes, Thursday at 14:00 for the demo works for me.'],
+]
+
 // The U3 take's thread (2026-10-20) in the example personas' names and numbers: the buyer asks below
 // the vendor's floor, the vendor's owner says yes on the ask, and the buyer's yes arrives after it.
 const ORDER: Line[] = [
@@ -132,6 +140,8 @@ export const POINTS: Point[] = [
     context: { notices: ['Meeting with Ana confirmed: Wed 15:00, 30 min'] },
   },
   { id: 'u1-7', title: 'Ana on the agenda and time counter', persona: 'ana', expected: ['ask'], messages: seen(COUNTER, 'ana', 3), context: {} },
+  // The contact's yes to a topic the person keeps the final yes on, which they have not given: ask.
+  { id: 'u1-8', title: "Ben on Ana's yes to a demo, his to give", persona: 'ben', expected: ['ask'], messages: seen(DEMO, 'ben', 3), context: {} },
   // The contact's yes makes the agreement, after the owner's own: confirm it to them, and tell the owner.
   {
     id: 'u3-1',
