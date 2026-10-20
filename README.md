@@ -201,7 +201,8 @@ unread in the owner's portal. The turn cap, the fourth, is not (it is the last r
 
 ## What Studio shows
 
-`npm run dev` (or `make dev`) serves Mastra Studio at http://localhost:4111, to this machine only. In
+`npm run dev` (or `make dev`) serves Mastra Studio at http://localhost:4111. The server binds 127.0.0.1 unless `MASTRA_HOST` names another address (`bindHost` in
+`src/mastra/origins.ts`), so with it unset, as in `.env.example`, Studio answers this machine only. In
 Studio you can chat with the `delegate` agent to try the persona. That chat is not the path a
 contact's message takes: Studio sends your text to the agent as plain text, while a message from
 a contact reaches it quoted as data inside a JSON block (`src/hdtp/prompt.ts`), so the same agent
