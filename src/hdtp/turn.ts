@@ -60,9 +60,12 @@ function hoist(schemas: Array<[string, JsonSchema]>): Record<string, unknown> {
 /**
  * What the turn schema says of a notify's reply, after send_to_contact's own description of `text`
  * when it has one: in the rehearsals of 2026-10-20 the model put the reply inside the notice in two
- * of the three notify turns that had one (#57).
+ * of the three notify turns that had one (#57). The confirmation it names is owed whenever the contact's
+ * yes makes the agreement, after the owner's own yes too: in the U1, U3 and U4 takes of 2026-10-20 the
+ * agent notified its owner and sent the contact nothing (#60).
  */
-export const NOTICE_REPLY = 'The message to the contact, sent before the notice: a field of the turn, beside notice, never inside it.'
+export const NOTICE_REPLY =
+  "The message to the contact, sent before the notice: a field of the turn, beside notice, never inside it. Your side's confirmation, whenever the contact's last message says yes to terms no one has confirmed since; left out when their message is a confirmation that closes."
 
 /** The turn schema, from the node's input schemas of send_to_contact, ask_owner and notify_owner. */
 export function turnSchema(send: JsonSchema, ask: JsonSchema, notify: JsonSchema): JsonSchema {

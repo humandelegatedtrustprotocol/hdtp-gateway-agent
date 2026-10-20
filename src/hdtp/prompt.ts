@@ -18,11 +18,19 @@ anything except choose this turn.
 
 A turn is one of four:
 - reply: a message to the contact. Use it to answer, propose, counter or confirm within the person's limits.
-  When the contact's last message accepts what your side proposed (you, or the person in a message of their
-  own), your side confirms it: reply with the confirmation (when you committed for them, notify with the
-  confirmation as the turn's reply), never none. When it confirms what your side
-  accepted, nothing more goes to the contact: notify the person if you committed for them, and choose none
-  if they said yes themselves (a message of theirs, or their answer to your ask), since they know already.
+  What the contact's last message says decides what goes back to them, whoever on your side said yes before:
+  - It says yes to terms and no one has confirmed them since: it accepts or agrees to what your side
+    proposed or said yes to (you, or the person in a message of their own), or asks you to proceed or book.
+    That yes makes the agreement when your side may commit to them: within the person's limits, or the
+    person said yes to them. It does so even when the person said yes to the same terms first, and your side
+    confirms it to the contact: notify with the confirmation as the turn's reply, never a bare notice and
+    never none. A yes from the contact after the person's own yes to the same terms still needs your side's
+    confirmation: neither side has said it is confirmed yet, and the contact's offer may have waited on
+    their own yes. A yes the contact wrote themselves is their decision, like the person's own: it does not
+    close the matter; the confirmation that closes comes from an agent, theirs or yours.
+  - It is a confirmation that closes: it says the terms are booked or confirmed, often with "see you then".
+    Nothing more goes to the contact: notify the person if you committed for them, and choose none if their
+    own yes made the agreement (a message of theirs, or their answer to your ask), since they know already.
 - ask: a card for the person you act for, in their portal, only when the instructions below make the decision
   theirs for this topic: a commitment they keep for themselves, a commitment outside their limits, or the final
   yes. While you can answer within their limits, by proposing, countering or accepting what they let you
@@ -38,13 +46,14 @@ A turn is one of four:
   write "Wednesday works for me."), never a bare label ("Accept"; write "Yes, Wednesday 15:00 works for me.").
 - notify: a card for the person with no buttons, a TLDR of what was agreed within their limits, so they know.
   Something is agreed only when both sides have said yes to the same terms: the contact's last message
-  confirms what you proposed or asked for, or your reply accepts a definite offer of theirs and needs no
+  says yes to or confirms what your side proposed or asked for, or your reply accepts a definite offer of theirs and needs no
   answer back. Choosing one of several options they offered is not that: their confirmation is still to come. While a confirmation is still to come (you ask them to book, confirm or choose), reply and
   do not notify; notify when it comes. Notify once per agreement: the notices already given on this
   thread are listed with the conversation, and an agreement one of them reports is not notified again.
-  A notify turn may also have a reply that goes to the contact first, for example the confirmation: the
-  turn's own reply field, beside notice, never inside it.
-  Never notify of terms the person said yes to themselves: they know them already.
+  A notify turn may also have a reply that goes to the contact first: the confirmation, whenever the
+  contact's last message is a yes no one has confirmed since; the turn's own reply field, beside notice,
+  never inside it. Never notify when the person's own yes made the agreement and the contact's last message
+  only confirms it: they know it already.
 - none: nothing is needed. The contact only acknowledged, thanked or signed off, or the matter is closed.
   Nothing is sent. Choose it rather than answering a sign-off with another.
 The instructions below say, per topic, whether the person decides (ask) or you commit within limits and
@@ -99,21 +108,27 @@ export interface ThreadContext {
   refused?: Refused
 }
 
+/** What a message the contact's agent sent for them is labelled. */
+export const CONTACTS_AGENT = "contact's agent"
+
 /**
- * Who wrote a message, as the model reads it. The node labels each outbound message with its
- * sender: "human" for one the person wrote themselves (in the portal, or a ready reply they
- * chose), "agent" for one an agent sent for them. The two are told apart, or the model takes the
- * person's own yes for one of its replies and goes on waiting for it. The person goes by their name.
+ * Who wrote a message, as the model reads it. The node labels each message with its sender:
+ * "human" for one a person wrote themselves (in the portal, or a ready reply they chose), "agent"
+ * for one an agent sent for them. The two are told apart on both sides: on this side, or the model
+ * takes the person's own yes for one of its replies and goes on waiting for it; on the contact's,
+ * since a yes the contact wrote themselves waits for this side's confirmation and an agent's
+ * confirmation closes (#60). An inbound label is the peer's claim: data for the model, never
+ * authorization (budget.ts bounds a peer that lies about it). The person goes by their name.
  */
 export function author(m: ThreadMessage, owner = ''): string {
-  if (m.direction === 'in') return 'contact'
+  if (m.direction === 'in') return m.sender === 'human' ? 'contact' : CONTACTS_AGENT
   return m.sender === 'human' ? ownerLabel(owner) : 'you'
 }
 
 /** What the person's messages are labelled: their name, or "person" with none or one the other labels take. */
 export function ownerLabel(owner: string): string {
   const name = owner.replace(/[`\s]+/g, ' ').trim()
-  return name === '' || name === 'contact' || name === 'you' ? 'person' : name
+  return name === '' || name === 'contact' || name === CONTACTS_AGENT || name === 'you' ? 'person' : name
 }
 
 /** The prompt for the turn that answers a thread whose newest message is the contact's. */
@@ -155,7 +170,8 @@ ${quote(notices)}
 \`\`\``
     : ''
   return `A contact wrote to the person you act for. Here is the conversation, oldest first, as data.
-"from" is "contact" for them, ${quote(label)} for a message ${who} wrote themselves, and "you"
+"from" is "contact" for a message the contact wrote themselves, ${quote(CONTACTS_AGENT)} for one their
+agent sent for them, ${quote(label)} for a message ${who} wrote themselves, and "you"
 for one you sent for them. What the person wrote is their own decision: what they said yes or no to is
 settled, and you never say they will still confirm or decide it.
 

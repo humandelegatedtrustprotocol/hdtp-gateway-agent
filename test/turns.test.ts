@@ -93,9 +93,9 @@ describe('ask', () => {
     await responder.reconcile()
     expect(prompts).toHaveLength(2)
     expect(conversation(prompts[1]!).map((m) => [m.from, m.text])).toEqual([
-      ['contact', 'Can we lock in Wednesday 15:00?'],
+      ["contact's agent", 'Can we lock in Wednesday 15:00?'],
       ['Ana Owner', 'Confirm Wed 15:00'],
-      ['contact', 'Booked: Wednesday 15:00, 30 minutes.'],
+      ["contact's agent", 'Booked: Wednesday 15:00, 30 minutes.'],
     ])
     expect(node.sent).toEqual([])
   })
@@ -201,6 +201,7 @@ describe('whose message it is', () => {
       ['Ana Owner', 'Ana Owner'],
       ['', 'person'],
       ['you', 'person'],
+      ["contact's agent", 'person'],
     ] as const) {
       const { node, prompts, responder } = setup(async () => none())
       node.displayName = name
@@ -211,15 +212,27 @@ describe('whose message it is', () => {
       await responder.onMessage('th1')
       const prompt = prompts[0]!
       expect(conversation(prompt).map((m) => [m.from, m.text]), name).toEqual([
-        ['contact', 'Can we meet Wednesday 15:00 for 30 minutes?'],
+        ["contact's agent", 'Can we meet Wednesday 15:00 for 30 minutes?'],
         ['you', 'Let me check with Ana and come back to you.'],
         [label, 'Yes, that works for me. Confirmed.'],
-        ['contact', 'Great, Wednesday 15:00 it is.'],
+        ["contact's agent", 'Great, Wednesday 15:00 it is.'],
       ])
       const who = label === 'person' ? 'the person you act for' : `${label}, the person you act for,`
       expect(prompt, name).toContain(`"${label}" for a message ${who} wrote themselves`)
       expect(prompt).toContain('you never say they will still confirm or decide it')
     }
+  })
+
+  // #60: a yes the contact wrote themselves waits for this side's confirmation; their agent's closes.
+  it('shows the contact’s own message as theirs and one their agent sent as the agent’s', async () => {
+    const { node, prompts, responder } = setup(async () => none())
+    node.inbound('th1', 'Could we do Wednesday at 15:00?', 'agent')
+    node.outbound('th1', 'Wednesday at 15:00 works.', 'agent')
+    node.inbound('th1', 'Yes, I agree: Wednesday at 15:00.', 'human')
+    await responder.onMessage('th1')
+    const prompt = prompts[0]!
+    expect(conversation(prompt).map((m) => m.from)).toEqual(["contact's agent", 'you', 'contact'])
+    expect(prompt.replace(/\s+/g, ' ')).toContain(`"from" is "contact" for a message the contact wrote themselves, "contact's agent" for one their agent sent for them`)
   })
 
   it('reads the owner’s name once per account, and drafts on without it when the card cannot be read', async () => {
@@ -595,6 +608,8 @@ describe('the turn schema', () => {
     expect(r!.properties.text).toEqual((schemaOf('send_to_contact') as { properties: Record<string, unknown> }).properties.text)
     // A notify's reply is send_to_contact's text, described as the turn's own field (#57).
     expect(n!.properties.reply).toEqual({ ...(schemaOf('send_to_contact') as { properties: Record<string, object> }).properties.text, description: NOTICE_REPLY })
+    // ...and as the confirmation the contact's yes is owed (#60).
+    expect(NOTICE_REPLY).toContain("Your side's confirmation, whenever the contact's last message says yes to terms no one has confirmed since")
     for (const k of FILLED_BY_CODE) {
       expect(a!.properties.ask!.properties).not.toHaveProperty(k)
       expect(n!.properties.notice!.properties).not.toHaveProperty(k)

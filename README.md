@@ -96,8 +96,9 @@ on you: I could not prepare an answer to a message the contact sent here."
 put a notice in, and gets none.
 
 The model sees the thread's newest 20 messages with who wrote each, from the node's sender label:
-the contact, the owner (a message they wrote in the portal, or a ready reply they chose), or the
-agent itself. It is told that what the owner wrote is their decision, so a yes they already gave is
+the contact themselves, the contact's agent, the owner (a message they wrote in the portal, or a
+ready reply they chose), or the agent itself. An inbound label is what the contact's side claims: it
+is data for the model, and no permission rests on it. It is told that what the owner wrote is their decision, so a yes they already gave is
 not treated as one still to come. Their answers to the thread's earlier asks are shown to it as
 their decisions too. The owner is named in the thread by their display name: `display_name` from
 the node's `export_card`, the name on the account's card, read once per account at start and kept
@@ -105,10 +106,16 @@ until the agent restarts. A card with no name, or a node whose `export_card` giv
 owner labelled "person" (`owner_name` in the log says whether a name was read; `owner_name_unread`,
 with the refusal, when the card could not be read, and the agent drafts on with "person").
 
-- **reply**: a message to the contact, sent with `send_to_contact`. The model is told that when the
-  contact accepts what this side proposed, this side confirms it with a reply rather than none; and
-  that when the contact confirms a yes the owner gave themselves, nothing more is sent and no notice
-  is put, since the owner knows already.
+- **reply**: a message to the contact, sent with `send_to_contact`. The model is told that the
+  contact's last message decides what goes back to them: a yes to terms no one has confirmed since
+  (accepting what this side proposed or said yes to, or asking it to proceed or book) makes the
+  agreement when this side may commit to those terms (within the owner's limits, or the owner said
+  yes to them), even when the owner said yes first (two yeses that cross still need this side's
+  confirmation), and this side confirms it to the contact, as the reply of a notify turn, never with
+  a bare notice or none. A yes the contact wrote themselves does not close the matter: the
+  confirmation that closes comes from an agent. A confirmation that closes ("booked", "see you then")
+  gets nothing more, and no notice either when the owner's own yes made
+  the agreement, since the owner knows already.
 - **ask**: a card for the owner, put with `ask_owner` for the message it is about, from the node's
   component catalog: a one-line TLDR and the key terms first, then one to three ready replies, each
   a Button the owner taps once to send it, and last a box to write their own with the Button that
@@ -135,7 +142,8 @@ with the refusal, when the card could not be read, and the agent drafts on with 
   agreed. The model is told that something is agreed only once both sides have said yes to the same
   terms, so a reply that still asks the contact to book or confirm goes without a notice, and the
   notice follows their confirmation; choosing one of several options the contact offered is not yet
-  an agreement; and terms the owner said yes to themselves are never notified. It is shown the TLDRs of the notices already put on the thread,
+  an agreement; and an agreement the owner's own yes made, which the contact only confirms, is never
+  notified. The turn schema describes a notify's reply as that confirmation too. It is shown the TLDRs of the notices already put on the thread,
   and told not to notify one agreement twice. In code, a notice is put for the message it answers
   and the node keeps one per message. A reply to the contact may go with it, sent first. A notice
   the node did not take is put again on later passes, with no new draft.
@@ -159,11 +167,11 @@ use cases (a meeting, an event venue, GPU procurement, a rent renewal, a dentist
 leave request, a refund), each with its limits and its stances. The model follows the stances; code
 does not read them. What code enforces is the rules below, which hold for every turn.
 
-`make eval` measures how well a model follows them. It drafts the turn at eleven points of the
-meeting and dentist stories (`eval/points.ts`), with the example personas, through the agent's own
+`make eval` measures how well a model follows them. It drafts the turn at 14 points of the
+meeting, GPU order, rent and dentist stories (`eval/points.ts`), with the example personas, through the agent's own
 path: the frame and persona as instructions, the configured model, the 4096-token cap, and the
 turn read against the node's schema as `test/owner-mcp-tools.json` holds it. It runs 5 times per
-point, 55 model calls, the most one run makes, never retried. It prints one JSON line per call and,
+point, 70 model calls, the most one run makes, never retried. It prints one JSON line per call and,
 per point, how many turns were of a passing type and how many were valid. `EVAL=--dry` builds every
 prompt and calls no model; `EVAL='--runs 1 --only u1-3'` runs part of it. It is not part of
 `make check`, which holds its points and its dry run with no network.
